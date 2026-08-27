@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="es-AR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panel Financiero · Ingresar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+<div class="login-wrap">
+  <form class="login-box" method="post">
+    <h1>Panel Financiero</h1>
+    <p>Ingresá la contraseña para continuar.</p>
+    {% if error %}<div class="login-error">{{ error }}</div>{% endif %}
+    <input type="password" name="password" placeholder="Contraseña" autofocus autocomplete="current-password" required>
+    <button class="btn" type="submit">Entrar</button>
+  </form>
+</div>
+</body>
+</html>

@@ -1,0 +1,25 @@
+# Entorno Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Secretos y configuración local
+.env
+
+# Base de datos y archivos subidos (datos personales — nunca al repo)
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Sistema operativo / editores
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Comprobantes de ejemplo (quedan solo en tu maquina)
+Comprobantes/

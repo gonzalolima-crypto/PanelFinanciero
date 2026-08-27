@@ -1,0 +1,30 @@
+# Configuración de despliegue en Fly.io
+# El nombre real de la app se define al correr `fly launch` (ver GUIA.md).
+app = "panel-financiero"
+primary_region = "eze"   # Buenos Aires (Ezeiza). Alternativas: "gru" (San Pablo), "scl" (Santiago).
+
+[build]
+
+[env]
+  PORT = "8080"
+  DATA_DIR = "/data"
+  DB_PATH = "/data/panel.db"
+  UPLOAD_DIR = "/data/uploads"
+  GEMINI_MODEL = "gemini-2.0-flash"
+  MAX_CONTENT_MB = "25"
+
+# Disco persistente: acá viven la base SQLite y los comprobantes subidos.
+[mounts]
+  source = "panel_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

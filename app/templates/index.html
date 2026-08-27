@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="es-AR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panel Financiero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+<script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Panel Financiero</h1>
+      <div class="sub">control de gastos · tarjeta · impuestos · ingresos · ahorro</div>
+    </div>
+    <div class="header-right">
+      {% if password_required %}
+      <form method="post" action="{{ url_for('auth.logout') }}"><button class="logout-btn" type="submit">salir</button></form>
+      {% endif %}
+      <div class="today" id="todayLabel"></div>
+    </div>
+  </header>
+
+  <div class="receipt-shell">
+    <div class="perf top"></div>
+    <div class="receipt">
+      <div class="receipt-title">
+        <span>Resumen del mes</span>
+        <select id="monthSelect"></select>
+      </div>
+      <div class="rline"><span class="lbl">Ingreso sueldo</span><span class="dots"></span><span class="val inc" id="sIngresoSueldo">$ 0</span></div>
+      <div class="rline"><span class="lbl">Ingreso extra</span><span class="dots"></span><span class="val inc" id="sIngresoExtra">$ 0</span></div>
+      <div class="rline"><span class="lbl">Gastos diarios</span><span class="dots"></span><span class="val neg" id="sGastoDiario">$ 0</span></div>
+      <div class="rline"><span class="lbl">Gastos con tarjeta</span><span class="dots"></span><span class="val neg" id="sGastoTarjeta">$ 0</span></div>
+      <div class="rline"><span class="lbl">Impuestos pagados</span><span class="dots"></span><span class="val tax" id="sImpuestos">$ 0</span></div>
+      <div class="rline total"><span class="lbl">Ahorro del mes</span><span class="dots"></span><span class="val pos" id="sAhorro">$ 0</span></div>
+      <div class="goal-row">
+        <div class="goal-caption">
+          <span>Objetivo de ahorro: <strong id="goalPctLabel">20%</strong> del ingreso · <input id="goalPctInput" type="number" min="0" max="100" value="20" style="width:50px;background:var(--surface-2);border:1px solid var(--line);color:var(--ink);border-radius:5px;padding:1px 5px;font-family:'JetBrains Mono',monospace;font-size:11px;"> %</span>
+          <span id="goalRealPct">real: 0%</span>
+        </div>
+        <div class="goal-bar-bg"><div class="goal-bar-fill" id="goalBarFill" style="width:0%"></div></div>
+      </div>
+    </div>
+    <div class="perf bottom"></div>
+  </div>
+
+  <div class="quick-grid">
+    <div class="voice-card">
+      <button class="mic-btn" id="micBtn" title="Cargar por voz">&#127908;</button>
+      <div class="voice-info">
+        <div class="vtitle">Cargar por voz</div>
+        <div class="vsub" id="voiceStatus">tocá el micrófono y decí algo como "pagué 15 mil de impuesto municipal" o "gasté 8000 en el super con tarjeta"</div>
+        <div class="voice-transcript" id="voiceTranscript"></div>
+        <div class="voice-alt">
+          <a id="audioUploadLink">o subir un audio grabado</a>
+          <input type="file" id="audioInput" accept="audio/*" style="display:none;">
+        </div>
+      </div>
+      <span class="voice-badge" id="voiceBadge"></span>
+    </div>
+
+    <div class="attach-card">
+      <input type="file" id="fileInput" accept="image/jpeg,image/png,application/pdf" style="display:none;">
+      <button class="attach-btn" id="attachBtn" title="Adjuntar comprobante">&#128206;</button>
+      <div class="attach-info">
+        <div class="atitle">Adjuntar comprobante</div>
+        <div class="asub" id="attachStatus">foto de ticket o PDF de resumen de tarjeta (Visa / Mastercard)</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="review-card" id="reviewCard" style="display:none;">
+    <div class="review-head">
+      <h3>Comprobante detectado</h3>
+      <div class="review-badges">
+        <span class="badge-brand" id="reviewBrand"></span>
+        <span class="badge-count" id="reviewCount"></span>
+      </div>
+    </div>
+    <div class="review-file" id="reviewFile"></div>
+    <div id="reviewGroups"></div>
+    <div class="review-total">
+      <span class="lbl" style="font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--ink-dim);">Total a cargar: <span class="rt-val" id="reviewTotal">$ 0</span></span>
+      <div class="review-actions">
+        <button class="btn secondary" id="reviewCancel">Cancelar</button>
+        <button class="btn" id="reviewConfirm">Confirmar y cargar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="form-card">
+    <h3>Cargar movimiento <span style="font-weight:400;color:var(--ink-faint);font-size:12px;">— revisá y confirmá con "Agregar"</span></h3>
+    <div class="form-row">
+      <div class="field">
+        <label>Tipo</label>
+        <select id="fType">
+          <option value="gasto_diario">Gasto diario</option>
+          <option value="gasto_tarjeta">Gasto con tarjeta</option>
+          <option value="impuesto">Impuesto pagado</option>
+          <option value="ingreso_sueldo">Ingreso · sueldo</option>
+          <option value="ingreso_extra">Ingreso · extra</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Fecha</label>
+        <input type="date" id="fDate">
+      </div>
+      <div class="field" id="fCatWrap">
+        <label>Categoría</label>
+        <select id="fCat"></select>
+      </div>
+      <div class="field">
+        <label>Monto (ARS)</label>
+        <input type="number" id="fAmount" placeholder="0" min="0" step="1">
+      </div>
+      <div class="field">
+        <label>Nota (opcional)</label>
+        <input type="text" id="fNote" placeholder="detalle breve">
+      </div>
+      <div class="field"><button class="btn" id="fSubmit">Agregar</button></div>
+    </div>
+    <div class="status" id="formStatus"></div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3><span class="dot" style="background:var(--coral)"></span>Gastos diarios (mes seleccionado)</h3>
+      <canvas id="chartDaily"></canvas>
+    </div>
+    <div class="card">
+      <h3><span class="dot" style="background:var(--amber)"></span>Gastos con tarjeta (mes seleccionado)</h3>
+      <canvas id="chartCard"></canvas>
+    </div>
+    <div class="card">
+      <h3><span class="dot" style="background:var(--blue)"></span>Ingresos por mes (sueldo vs extra)</h3>
+      <canvas id="chartIncome"></canvas>
+    </div>
+    <div class="card">
+      <h3><span class="dot" style="background:var(--amber)"></span>Impuestos pagados por mes</h3>
+      <canvas id="chartTax"></canvas>
+    </div>
+    <div class="card">
+      <h3><span class="dot" style="background:var(--green)"></span>Ahorro mensual vs objetivo</h3>
+      <canvas id="chartSavings"></canvas>
+    </div>
+    <div class="card">
+      <h3><span class="dot" style="background:var(--ink-dim)"></span>Distribución de gastos por categoría</h3>
+      <canvas id="chartCategory"></canvas>
+    </div>
+  </div>
+
+  <div class="table-card">
+    <div class="table-head">
+      <h3 style="font-family:'Space Grotesk',sans-serif;margin:0;font-size:16px;">Movimientos — <span id="tableMonthLabel"></span></h3>
+      <span class="status" id="countLabel"></span>
+    </div>
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Fecha</th><th>Tipo</th><th>Categoría</th><th>Nota</th><th style="text-align:right">Monto</th><th></th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    </div>
+    <div class="empty" id="emptyMsg" style="display:none;">Todavía no cargaste movimientos este mes.</div>
+  </div>
+</div>
+
+<footer>
+  Los datos se guardan en la base de datos del servidor. Protegé el acceso con la contraseña única.
+  No cargues datos sensibles como números de cuenta o tarjeta completos.
+</footer>
+
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
