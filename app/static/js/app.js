@@ -452,9 +452,11 @@ function setAttachBusy(busy){
 
 async function handleFileSelected(file){
   if(!file) return;
-  const ok = ['application/pdf','image/jpeg','image/png'].includes(file.type);
-  if(!ok){
-    document.getElementById('attachStatus').textContent = 'Formato no soportado. Usá una foto (JPG/PNG) o un PDF.';
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  const okType = ['application/pdf','image/jpeg','image/png'].includes(file.type);
+  const okExt = ['pdf','jpg','jpeg','png'].includes(ext);
+  if(!okType && !okExt){
+    document.getElementById('attachStatus').textContent = 'Formato no soportado. Usá un PDF (o una foto JPG/PNG).';
     return;
   }
   document.getElementById('attachStatus').textContent = 'analizando comprobante...';

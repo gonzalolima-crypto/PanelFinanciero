@@ -130,8 +130,19 @@ def attachment_parse():
     file = request.files.get("file")
     if file is None:
         return jsonify({"error": "No se recibió ningún archivo."}), 400
+
+    # Algunos navegadores/Windows no informan el tipo: deducirlo de la extensión.
+    mimetype = (file.mimetype or "").lower()
+    if mimetype in ("", "application/octet-stream", "binary/octet-stream"):
+        ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+        mimetype = {
+            "pdf": "application/pdf",
+            "jpg": "image/jpeg", "jpeg": "image/jpeg",
+            "png": "image/png", "webp": "image/webp",
+        }.get(ext, mimetype)
+
     try:
-        result = llm.parse_attachment(file.read(), file.mimetype or "")
+        result = llm.parse_attachment(file.read(), mimetype)
     except llm.LLMError as exc:
         return jsonify({"error": str(exc)}), 502
     result["fileName"] = file.filename or "comprobante"

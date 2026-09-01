@@ -39,6 +39,15 @@ MAX_IMAGE_B64 = 3_500_000  # límite de Groq: 4 MB de base64 por imagen
 RATE_LIMIT_RETRIES = 2     # reintentos ante error 429 (cuota por minuto)
 RATE_LIMIT_MAX_WAIT = 30   # segundos máximos de espera por reintento
 
+# El plan gratuito de Groq limita tokens por minuto (TPM). Groq cuenta
+# input + max_tokens de salida contra ese tope. Presupuestamos por debajo.
+TPM_BUDGET = 7000
+CHARS_PER_TOKEN = 3.3      # estimación conservadora para texto en español con números
+
+
+def _estimate_tokens(text: str) -> int:
+    return int(len(text) / CHARS_PER_TOKEN) + 1
+
 
 class LLMError(Exception):
     """Error al hablar con Groq o al interpretar su respuesta."""
@@ -108,6 +117,11 @@ def _handle_http_errors(resp: requests.Response) -> None:
         raise LLMError(
             "El modelo configurado no está disponible para tu cuenta de Groq. "
             "Revisá GROQ_TEXT_MODEL / GROQ_VISION_MODEL en el .env."
+        )
+    if resp.status_code == 413:
+        raise LLMError(
+            "El comprobante es muy grande para el límite gratuito de Groq. "
+            "Probá con un resumen de menos páginas, o cargá los movimientos a mano."
         )
     if resp.status_code >= 400:
         detail = ""
@@ -264,19 +278,56 @@ def _pdf_text(file_bytes: bytes) -> str:
     finally:
         doc.close()
 
-    # Quitar líneas de encabezado/pie repetidas para achicar el texto
+    if len(raw.strip()) < 20:
+        raise LLMError(
+            "El PDF no tiene texto seleccionable (parece escaneado). "
+            "Probá con el PDF original del banco, o cargá los movimientos a mano."
+        )
+
+    brand = ""
+    low = raw.lower()
+    if "mastercard" in low:
+        brand = "Mastercard"
+    elif re.search(r"\bvisa\b", low):
+        brand = "Visa"
+
     noise = re.compile(
         r"^\s*(Sobre \(\d+\)|Banco BBVA Argentina|.*Página \d+ de \d+|"
         r"OCASA - R\.N\.P\.S\.P|URBOES|1/1 \d+|.*DIGITAL\s*$)",
         re.IGNORECASE,
     )
-    text = "\n".join(ln for ln in raw.splitlines() if ln.strip() and not noise.match(ln))
-    if len(text.strip()) < 20:
-        raise LLMError(
-            "El PDF no tiene texto seleccionable (parece escaneado). "
-            "Probá con el PDF original del banco, o cargá los movimientos a mano."
-        )
-    return text
+    lines = [ln for ln in raw.splitlines() if ln.strip() and not noise.match(ln)]
+    return _focus_statement("\n".join(lines)), brand
+
+
+def _focus_statement(text: str) -> str:
+    """Deja sólo las secciones de consumos de un resumen de tarjeta.
+
+    Un resumen BBVA tiene bloques 'Consumos <Titular>' ... 'TOTAL CONSUMOS DE ...'.
+    El resto (saldos, límites, tasas, pagos, impuestos del resumen, cuotas a
+    vencer) no aporta consumos y sólo gasta tokens.
+    """
+    lines = text.splitlines()
+    start_re = re.compile(r"^\s*Consumos\s+.+", re.IGNORECASE)
+    end_re = re.compile(r"^\s*TOTAL CONSUMOS DE\b", re.IGNORECASE)
+
+    blocks, keeping = [], False
+    for ln in lines:
+        if start_re.match(ln):
+            keeping = True
+            blocks.append(ln)
+            continue
+        if keeping:
+            blocks.append(ln)
+            if end_re.match(ln):
+                keeping = False
+
+    focused = "\n".join(blocks).strip()
+    # Si no encontramos el patrón (ticket suelto, otro banco), usar el texto
+    # completo salvo que sea enorme.
+    if len(focused) < 40:
+        return text if len(text) <= 9000 else text[:9000]
+    return focused
 
 
 def _image_data_url(file_bytes: bytes, mime_type: str) -> str:
@@ -367,22 +418,70 @@ def _normalize_date(value) -> str:
     return ""
 
 
+def _statement_call(text: str) -> dict:
+    system_tokens = _estimate_tokens(_ATTACH_RULES)
+    input_tokens = _estimate_tokens(text) + system_tokens + 30
+    out_budget = TPM_BUDGET - input_tokens
+    if out_budget < 500:
+        raise LLMError(
+            "El comprobante es muy grande para el límite gratuito de Groq. "
+            "Probá con un resumen de menos páginas, o cargá los movimientos a mano."
+        )
+    raw = _chat(
+        [
+            {"role": "system", "content": _ATTACH_RULES},
+            {"role": "user", "content": "Texto extraído del comprobante:\n\n" + text},
+        ],
+        model=config.GROQ_TEXT_MODEL,
+        max_tokens=min(4000, out_budget),
+    )
+    return _parse_json(raw)
+
+
+def _split_statement(text: str) -> list[str]:
+    """Parte un resumen en trozos (por bloque 'Consumos <Titular>') que quepan
+    en el presupuesto de tokens."""
+    parts = re.split(r"(?im)^(?=\s*Consumos\s+\S)", text)
+    parts = [p.strip() for p in parts if p.strip()]
+    if len(parts) <= 1:
+        return [text]
+    budget_chars = int((TPM_BUDGET - 1500 - _estimate_tokens(_ATTACH_RULES)) * CHARS_PER_TOKEN)
+    chunks, cur = [], ""
+    for p in parts:
+        if cur and len(cur) + len(p) > budget_chars:
+            chunks.append(cur)
+            cur = p
+        else:
+            cur = f"{cur}\n{p}" if cur else p
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
+def _parse_statement_text(text: str, brand_hint: str = "") -> dict:
+    if _estimate_tokens(text) + _estimate_tokens(_ATTACH_RULES) + 1000 <= TPM_BUDGET:
+        result = _statement_call(text)
+    else:
+        result = {"doc_type": "resumen_tarjeta", "card_brand": "", "items": []}
+        for i, chunk in enumerate(_split_statement(text)):
+            part = _statement_call(chunk)
+            if i == 0:
+                result["doc_type"] = part.get("doc_type") or "resumen_tarjeta"
+                result["card_brand"] = part.get("card_brand") or ""
+            result["items"].extend(part.get("items") or [])
+    if not result.get("card_brand") and brand_hint:
+        result["card_brand"] = brand_hint
+    return result
+
+
 def parse_attachment(file_bytes: bytes, mime_type: str) -> dict:
     if not file_bytes:
         raise LLMError("El archivo está vacío.")
     mime_type = (mime_type or "").split(";")[0].strip().lower()
 
     if mime_type == "application/pdf":
-        text = _pdf_text(file_bytes)
-        raw = _chat(
-            [
-                {"role": "system", "content": _ATTACH_RULES},
-                {"role": "user", "content": "Texto extraído del comprobante:\n\n" + text},
-            ],
-            model=config.GROQ_TEXT_MODEL,
-            max_tokens=8000,
-        )
-        return _normalize_result(_parse_json(raw))
+        text, brand_hint = _pdf_text(file_bytes)
+        return _normalize_result(_parse_statement_text(text, brand_hint))
 
     # Imagen: sólo si hay un modelo con visión configurado
     if mime_type in ("image/jpeg", "image/png", "image/webp"):

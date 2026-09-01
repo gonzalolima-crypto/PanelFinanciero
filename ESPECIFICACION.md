@@ -120,6 +120,8 @@ está configurada.
 | Flask + SQLite3 | Acordado en la reunión. Baja complejidad, una sola persona lo usa. |
 | Groq (nivel gratuito) | Clave provista por el usuario. API compatible con OpenAI. Incluye Whisper para audio. Proveedor/modelo intercambiable por variables de entorno. |
 | Comprobantes: extraer texto del PDF + estructurar con LLM | La cuenta de Groq del usuario no tiene modelo con visión. Los resúmenes del banco son PDF con texto seleccionable, así que la extracción con PyMuPDF es 100 % fiel y además usa menos tokens que enviar imágenes. |
+| "Focalizar" el texto del resumen antes de mandarlo | El plan gratuito de Groq tiene un límite bajo de tokens por minuto (~8000, e incluye el `max_tokens` de salida). `_focus_statement()` deja sólo los bloques "Consumos … / TOTAL CONSUMOS DE …" (de ~13 KB a <1 KB). Si aún así no entra, `_split_statement()` lo parte por titular y hace varias llamadas. |
+| Deducir tipo de archivo por extensión | Algunos navegadores/Windows no informan el MIME al subir; el backend lo deduce de la extensión del nombre. |
 | `GROQ_VISION_MODEL` opcional | Si en el futuro se habilita un modelo con visión, basta setear la variable y las fotos JPG/PNG funcionan sin cambios de código. |
 | API key en el backend | El prototipo la exponía en el navegador. Riesgo de robo de clave y de cuota. |
 | Contraseña única (no login por usuario) | Uso personal. Suficiente para proteger un link público. |
