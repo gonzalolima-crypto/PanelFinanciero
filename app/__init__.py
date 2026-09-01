@@ -32,9 +32,9 @@ def create_app() -> Flask:
             "APP_PASSWORD no está configurada: el panel queda SIN protección. "
             "Configurala antes de publicar la app."
         )
-    if not app_config.GEMINI_API_KEY:
+    if not app_config.GROQ_API_KEY:
         app.logger.warning(
-            "GEMINI_API_KEY no está configurada: la carga por voz y por comprobante "
+            "GROQ_API_KEY no está configurada: la carga por voz y por comprobante "
             "no van a funcionar hasta que la agregues al .env."
         )
 

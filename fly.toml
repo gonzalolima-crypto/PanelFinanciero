@@ -10,8 +10,10 @@ primary_region = "eze"   # Buenos Aires (Ezeiza). Alternativas: "gru" (San Pablo
   DATA_DIR = "/data"
   DB_PATH = "/data/panel.db"
   UPLOAD_DIR = "/data/uploads"
-  GEMINI_MODEL = "gemini-2.0-flash"
+  GROQ_TEXT_MODEL = "openai/gpt-oss-120b"
+  GROQ_TRANSCRIBE_MODEL = "whisper-large-v3-turbo"
   MAX_CONTENT_MB = "25"
+  PDF_MAX_PAGES = "8"
 
 # Disco persistente: acá viven la base SQLite y los comprobantes subidos.
 [mounts]

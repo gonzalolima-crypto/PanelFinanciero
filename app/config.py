@@ -31,10 +31,21 @@ UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", str(DATA_DIR / "uploads")))
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-inseguro-cambiar")
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "").strip()
 
-# --- Gemini --------------------------------------------------------------
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash").strip()
-GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models"
+# --- Groq (API compatible con OpenAI) ----------------------------------
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
+GROQ_BASE_URL = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1").strip().rstrip("/")
+# Modelo de texto: interpreta lo que se dicta por voz y estructura el texto
+# de los comprobantes PDF -> JSON
+GROQ_TEXT_MODEL = os.environ.get("GROQ_TEXT_MODEL", "openai/gpt-oss-120b").strip()
+# Modelo con visión (opcional): para leer fotos JPG/PNG de tickets.
+# Dejar vacío si tu cuenta de Groq no tiene un modelo con visión habilitado;
+# en ese caso los comprobantes se aceptan sólo en PDF.
+GROQ_VISION_MODEL = os.environ.get("GROQ_VISION_MODEL", "").strip()
+# Modelo de transcripción de audio (Whisper)
+GROQ_TRANSCRIBE_MODEL = os.environ.get("GROQ_TRANSCRIBE_MODEL", "whisper-large-v3-turbo").strip()
+
+# Cuántas páginas de un PDF se procesan como máximo (cada una es una imagen)
+PDF_MAX_PAGES = _as_int("PDF_MAX_PAGES", 8)
 
 # --- Límites -------------------------------------------------------------
 MAX_CONTENT_MB = _as_int("MAX_CONTENT_MB", 25)

@@ -12,7 +12,7 @@ def client(monkeypatch):
     monkeypatch.setenv("DB_PATH", os.path.join(tmp, "test.db"))
     monkeypatch.setenv("UPLOAD_DIR", os.path.join(tmp, "uploads"))
     monkeypatch.setenv("APP_PASSWORD", "")  # sin protección para las pruebas
-    monkeypatch.setenv("GEMINI_API_KEY", "")
+    monkeypatch.setenv("GROQ_API_KEY", "")
 
     # Recargar config con las env nuevas
     import importlib
@@ -77,4 +77,4 @@ def test_config(client):
 def test_voz_sin_apikey_devuelve_502(client):
     r = client.post("/api/voice/parse", json={"text": "gasté 5000 en el super"})
     assert r.status_code == 502
-    assert "Gemini" in r.json["error"]
+    assert "Groq" in r.json["error"]

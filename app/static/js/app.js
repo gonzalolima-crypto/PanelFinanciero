@@ -477,7 +477,7 @@ async function handleFileSelected(file){
       groups
     };
     renderAttachmentReview();
-    document.getElementById('attachStatus').textContent = 'foto de ticket o PDF de resumen de tarjeta (Visa / Mastercard)';
+    document.getElementById('attachStatus').textContent = 'PDF de resumen de tarjeta (Visa / Mastercard) o de ticket';
   }catch(err){
     document.getElementById('attachStatus').textContent = 'No se pudo interpretar el comprobante: ' + err.message;
   }finally{

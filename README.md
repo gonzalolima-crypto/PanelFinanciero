@@ -1,19 +1,21 @@
 # Panel Financiero
 
 Aplicación web personal de control de finanzas: gastos diarios, gastos con
-tarjeta, impuestos, ingresos y ahorro. Carga manual, **por voz** o **adjuntando
-comprobantes** (foto de ticket / PDF de resumen de tarjeta), interpretados con
-Google Gemini.
+tarjeta, impuestos, ingresos y ahorro. Carga manual, **por voz** (dictado o
+audio) o **adjuntando comprobantes en PDF** (resumen de tarjeta / ticket),
+interpretados con modelos de Groq.
 
 - **Backend:** Flask + SQLite3
 - **Frontend:** HTML + JavaScript + Chart.js (servido localmente)
-- **IA:** Google Gemini (nivel gratuito)
+- **IA:** Groq — `openai/gpt-oss-120b` (texto), `whisper-large-v3-turbo` (audio).
+  PDF de comprobantes: texto extraído con PyMuPDF y estructurado por el modelo.
 - **Despliegue:** Docker + Fly.io
 
 ## Arranque rápido (Windows)
 
-Doble clic en **`iniciar.bat`**. La primera vez instala todo y crea `.env`;
-completá `GEMINI_API_KEY` y `APP_PASSWORD` en ese archivo y volvé a iniciarlo.
+Doble clic en **`iniciar.bat`**. La primera vez instala todo. La clave de Groq
+(`GROQ_API_KEY`) ya viene cargada en `.env`; si querés proteger el panel,
+completá `APP_PASSWORD` en ese archivo y volvé a iniciarlo.
 
 ## Arranque manual
 
