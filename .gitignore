@@ -23,3 +23,8 @@ desktop.ini
 
 # Comprobantes de ejemplo (quedan solo en tu maquina)
 Comprobantes/
+
+# Artefactos de depuracion
+run_out.txt
+run_err.txt
+browser_would_open.txt

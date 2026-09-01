@@ -78,9 +78,21 @@ descargalo de **https://www.python.org/downloads/** y, en el instalador,
 ### Uso normal (de acá en adelante)
 
 - Doble clic en **`iniciar.bat`**.
-- Se abre solo el navegador en **http://localhost:8000**.
-  (Si no se abre, escribí esa dirección a mano en el navegador.)
-- Para **apagar** la app: cerrá la ventana negra que quedó abierta.
+- **Esperá hasta 1 minuto**: el navegador se abre **solo** en
+  **http://127.0.0.1:8000** cuando la app está lista.
+  (Si no se abre, escribí `http://127.0.0.1:8000` a mano en el navegador.)
+- **No cierres la ventana negra** mientras usás el panel: esa ventana *es* la app.
+- Para **apagar** la app: cerrá la ventana negra.
+
+### Probar desde el celular (misma red WiFi)
+
+Con la app corriendo en la compu:
+
+1. En la ventana negra, buscá la línea `Desde el celular ... http://<IP-de-esta-PC>:8000`.
+2. Averiguá la IP de la compu: abrí PowerShell y escribí `ipconfig`; mirá
+   *"Dirección IPv4"* (algo como `192.168.0.15`).
+3. En el celular (conectado a la misma WiFi), abrí el navegador y entrá a
+   `http://192.168.0.15:8000` (con la IP que te haya dado).
 
 ### ¿Qué es cada cosa que ves?
 

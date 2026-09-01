@@ -24,7 +24,7 @@ python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt   # Windows
 # source .venv/bin/activate && pip install -r requirements.txt   # Linux/Mac
 cp .env.example .env        # y completar valores
-python run.py               # http://localhost:8000
+python run.py               # http://127.0.0.1:8000
 ```
 
 ## Pruebas
