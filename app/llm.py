@@ -247,7 +247,7 @@ def transcribe_audio(audio_bytes: bytes, mime_type: str) -> str:
 # --- 3. Comprobante -> items ------------------------------------
 
 _ATTACH_RULES = f"""Devolvé SOLO un objeto JSON válido (sin texto adicional, sin markdown, sin backticks):
-{{"doc_type":"ticket|resumen_tarjeta","card_brand":"Visa|Mastercard|","items":[{{"date":"YYYY-MM-DD","merchant":"string","amount":number,"category":"string"}}]}}
+{{"doc_type":"ticket|resumen_tarjeta","card_brand":"Visa|Mastercard|Amex|","due_date":"YYYY-MM-DD|","items":[{{"date":"YYYY-MM-DD","merchant":"string","amount":number,"category":"string"}}]}}
 
 Reglas:
 - doc_type "ticket": comprobante de una sola compra -> "items" tiene un único elemento con el total.
@@ -255,7 +255,10 @@ Reglas:
 - Incluí únicamente CONSUMOS / COMPRAS reales (de cualquier titular de la cuenta).
   EXCLUÍ: pagos ("SU PAGO EN PESOS/USD"), ajustes, percepciones e impuestos del resumen
   (IIBB, IVA RG, DB.RG, sellado), intereses, punitorios, "cuotas a vencer" y saldos.
-- card_brand: "Visa" o "Mastercard" si el documento lo indica claramente; si no, "".
+- card_brand: "Visa", "Mastercard" o "Amex" si el documento lo indica claramente; si no, "".
+- due_date: SOLO para doc_type "resumen_tarjeta". Es la fecha de "VENCIMIENTO ACTUAL"
+  (o "Fecha de vencimiento" / "Vencimiento del pago") de ESTE resumen, en formato YYYY-MM-DD.
+  NO uses "vencimiento anterior" ni "próximo vencimiento". Si no figura, dejá "".
 - category: elegí UNA de {CATS_GASTO} según el comercio o rubro.
 - date: formato YYYY-MM-DD. El resumen usa formatos como "28-Jul-26" (= 2026-07-28).
   Si un consumo no tiene fecha propia, usá la fecha de cierre del resumen.
@@ -265,7 +268,35 @@ Reglas:
 """
 
 
-def _pdf_text(file_bytes: bytes) -> str:
+def _extract_due_date(raw: str) -> str:
+    """Busca la fecha de 'VENCIMIENTO ACTUAL' en el texto crudo del resumen."""
+    date_pat = r"([0-3]?\d[-/](?:[A-Za-zÁÉÍÓÚáéíóú]{3,}|\d{1,2})[-/]\d{2,4})"
+    patterns = [
+        r"VENCIMIENTO\s+ACTUAL\s{0,10}" + date_pat,
+        r"(?:fecha\s+(?:de\s+|l[ií]mite\s+de\s+)?)?"
+        r"(?:vencimiento(?:\s+del\s+pago)?|pago\s+hasta(?:\s+el)?|payment\s+due\s+date)"
+        r"\s{0,3}[:\-]?\s{0,10}" + date_pat,
+    ]
+    for pat in patterns:
+        m = re.search(pat, raw, re.IGNORECASE)
+        if m:
+            d = _normalize_date(m.group(1))
+            if d:
+                return d
+    return ""
+
+
+class _PdfContent:
+    __slots__ = ("llm_text", "consumos", "brand", "due_date")
+
+    def __init__(self, llm_text: str, consumos: str, brand: str, due_date: str):
+        self.llm_text = llm_text      # texto a mandar al modelo (fallback)
+        self.consumos = consumos      # solo los bloques de consumos (para el parser regex)
+        self.brand = brand
+        self.due_date = due_date
+
+
+def _pdf_text(file_bytes: bytes) -> "_PdfContent":
     try:
         doc = fitz.open(stream=file_bytes, filetype="pdf")
     except Exception as exc:
@@ -290,6 +321,10 @@ def _pdf_text(file_bytes: bytes) -> str:
         brand = "Mastercard"
     elif re.search(r"\bvisa\b", low):
         brand = "Visa"
+    elif "american express" in low or re.search(r"\bamex\b", low):
+        brand = "Amex"
+
+    due_date = _extract_due_date(raw)
 
     noise = re.compile(
         r"^\s*(Sobre \(\d+\)|Banco BBVA Argentina|.*Página \d+ de \d+|"
@@ -297,7 +332,23 @@ def _pdf_text(file_bytes: bytes) -> str:
         re.IGNORECASE,
     )
     lines = [ln for ln in raw.splitlines() if ln.strip() and not noise.match(ln)]
-    return _focus_statement("\n".join(lines)), brand
+    consumos = _focus_statement("\n".join(lines))
+
+    llm_text = consumos
+    # Si el regex NO encontró el vencimiento (otro banco / formato raro),
+    # anteponemos un encabezado acotado con las líneas de fechas/vencimiento
+    # para que el modelo lo intente. Si el regex ya lo tiene, no hace falta.
+    if not due_date:
+        keep = re.compile(
+            r"(vencimiento|cierre|fecha\s+(de\s+)?pago|pago\s+m[ií]nimo|"
+            r"payment\s+due|closing\s+date|\d{1,2}[-/][A-Za-z]{3}[-/]\d{2,4})",
+            re.IGNORECASE,
+        )
+        header = [ln for ln in lines[:70] if keep.search(ln)][:20]
+        if header:
+            llm_text = "DATOS DEL RESUMEN:\n" + "\n".join(header) + "\n\nCONSUMOS:\n" + consumos
+
+    return _PdfContent(llm_text, consumos, brand, due_date)
 
 
 def _focus_statement(text: str) -> str:
@@ -328,6 +379,120 @@ def _focus_statement(text: str) -> str:
     if len(focused) < 40:
         return text if len(text) <= 9000 else text[:9000]
     return focused
+
+
+# --- Parser determinístico de consumos (formato BBVA Visa/Mastercard) ---
+
+_CAT_KEYWORDS = [
+    ("Alimentos", r"COTO|CARREFOUR|JUMBO|\bDIA\b|DISCO|VEA |LA ANONIMA|LA ANÓNIMA|CHANGOMAS|"
+                  r"WALMART|MAKRO|VITAL|MAXICONSUMO|ALMACEN|VERDULER|CARNICER|PANADER|"
+                  r"KIOSCO|RESTO|RESTAURANT|MC DONALD|MCDONALD|BURGER|STARBUCKS|CAFE|BAR "),
+    ("Transporte", r"YPF|SHELL|AXION|PUMA ENERGY|GNC|ESTACION|AUTOPISTA|TELEPEAJE|PEAJE|AUBASA|"
+                   r"AUSA|CAMINOS|SUBE|MERPAGO\*?SUBE|UBER|CABIFY|DIDI|BEAT|REMIS|TAXI|"
+                   r"AVIS|HERTZ|LOCALIZA|RENT.?A.?CAR|AEROLINEAS|LATAM|FLYBONDI|JETSMART|"
+                   r"ESTACIONAMIENTO|PARKING|CVSA|VTV"),
+    ("Suscripciones", r"NETFLIX|SPOTIFY|DISNEY|HBO|MAX\b|PARAMOUNT|PRIME VIDEO|AMAZON PRIME|"
+                      r"YOUTUBE|APPLE\.COM|APPLE COM|GOOGLE \*|GOOGLE\*|ITUNES|PLAYSTATION|"
+                      r"XBOX|NINTENDO|CANVA|NOTION|CHATGPT|OPENAI|DROPBOX|MERCADO LIBRE\+|"
+                      r"MELI\+|CLARO VIDEO|FLOW\b|PARAMOUNT"),
+    ("Servicios", r"TELECENTRO|FIBERTEL|CABLEVISION|CABLEVISIÓN|MOVISTAR|CLARO|PERSONAL|TUENTI|"
+                  r"IPLAN|GIGARED|EDENOR|EDESUR|EDEA|METROGAS|NATURGY|CAMUZZI|AYSA|ABL|RENTAS|"
+                  r"AGIP|ARBA|MUNICIPAL|SEGURO|SEGUROS|CAJA SEG|LA CAJA|SANCOR SEG|"
+                  r"PREVENCION|GALENO|EXPENSAS|CONSORCIO|PAGOS360|RAPIPAGO|PAGO FACIL|"
+                  r"PAGOFACIL|BApro|PROVINCIA NET"),
+    ("Salud", r"FARMACIA|FARMACITY|FARMACIAS|DR AHORRO|DEL DR|PHARMACY|CVS|HOSPITAL|SANATORIO|"
+              r"CLINICA|CLÍNICA|LABORATOR|DENTAL|ODONTO|OPTICA|ÓPTICA|OSDE|SWISS MEDICAL|"
+              r"MEDICUS|GALENO|OMINT|MEDIFE|HOMEOPAT"),
+    ("Hogar", r"ARREDO|EASY|SODIMAC|SODIMCO|FALABELLA|MERCADO LIBRE|MERCADOLIBRE|MERPAGO\*?"
+              r"(?:DILUCE|LAMAYOR)|BAZAR|FERRETER|PINTURER|SANITARIOS|MUEBLES|MOVISTAR HOGAR|"
+              r"DECO|BLANQUER|RITZ|LA CARDEUSE|SIMMONS|PIERO"),
+    ("Ocio", r"CINE|CINEMA|HOYTS|CINEMARK|SHOWCASE|TEATRO|SPOTIFY|GARBARINO|FRAVEGA|"
+             r"MUSIMUNDO|DUTY FREE|CLUB|GIMNASIO|GYM|SPORTCLUB|MEGATLON|PADEL|"
+             r"CANCHA|BOWLING|PARQUE|KANSAS|KENTUCKY|LA MISION|HELAD"),
+]
+
+_CONSUMO_DATE = re.compile(r"^\s*(\d{1,2}-[A-Za-zÁÉÍÓÚáéíóú]{3,}-\d{2,4})\s*$")
+_CONSUMO_AMOUNT = re.compile(r"^\s*(-?\$?\s?[\d.]{1,15},\d{2})\s*$")
+_CONSUMO_CUPON = re.compile(r"^\s*\d{3,12}\s*$")
+_SECTION_LINE = re.compile(r"^\s*(TOTAL CONSUMOS DE|Consumos\s+\S|FECHA|DESCRIPCI|NRO\.|PESOS|D[ÓO]LARES)", re.IGNORECASE)
+
+
+def _categorize(merchant: str) -> str:
+    up = merchant.upper()
+    for cat, pat in _CAT_KEYWORDS:
+        if re.search(pat, up):
+            return cat
+    return "Otros"
+
+
+def _amount_to_float(s: str) -> float:
+    s = s.replace("$", "").replace(" ", "").replace(".", "").replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def _clean_merchant(desc: str) -> str:
+    m = re.split(r"\s{2,}", desc.strip(), maxsplit=1)[0]           # corta en doble espacio
+    m = re.sub(r"\b(USD|U\$S)\b.*$", "", m, flags=re.IGNORECASE)   # saca "USD 2,99"
+    m = re.sub(r"\bC\.\d{2}/\d{2}\b.*$", "", m)                    # saca cuota "C.03/06"
+    m = re.sub(r"\s+\S*\d{4,}\S*\s*$", "", m)                      # saca códigos de referencia al final
+    m = re.sub(r"[*]+", " ", m).strip(" -*")
+    return re.sub(r"\s{2,}", " ", m).strip()[:40]
+
+
+def _extract_consumos_regex(consumos_text: str) -> list[dict]:
+    """Extrae los consumos de un resumen BBVA de forma determinística
+    (sin depender del modelo). Devuelve items sin categoría normalizada."""
+    lines = consumos_text.splitlines()
+    items: list[dict] = []
+    i, n = 0, len(lines)
+    while i < n:
+        md = _CONSUMO_DATE.match(lines[i])
+        if not md:
+            i += 1
+            continue
+        date = _normalize_date(md.group(1))
+        j = i + 1
+        # descripción: primera línea siguiente que no sea monto/cupón/sección
+        desc = ""
+        while j < n:
+            s = lines[j].strip()
+            if not s or _SECTION_LINE.match(s) or _CONSUMO_DATE.match(lines[j]):
+                break
+            if _CONSUMO_AMOUNT.match(lines[j]) or _CONSUMO_CUPON.match(lines[j]):
+                j += 1
+                continue
+            desc = s
+            j += 1
+            break
+        # montos: las siguientes líneas que sean monto (saltando cupón)
+        amounts = []
+        while j < n:
+            s = lines[j].strip()
+            if _CONSUMO_CUPON.match(s):
+                j += 1
+                continue
+            if _CONSUMO_AMOUNT.match(s):
+                amounts.append(s)
+                j += 1
+                continue
+            break
+        if desc and amounts:
+            is_usd = bool(re.search(r"\b(USD|U\$S)\b", desc, re.IGNORECASE))
+            value = _amount_to_float(amounts[0])
+            merchant = _clean_merchant(desc)
+            if is_usd and "(USD)" not in merchant:
+                merchant = (merchant + " (USD)").strip()
+            items.append({
+                "date": date or _today(),
+                "merchant": merchant,
+                "amount": value,
+                "category": _categorize(merchant),
+            })
+        i = max(j, i + 1)
+    return items
 
 
 def _image_data_url(file_bytes: bytes, mime_type: str) -> str:
@@ -387,6 +552,7 @@ def _normalize_result(parsed: dict) -> dict:
     return {
         "doc_type": parsed.get("doc_type") or "ticket",
         "card_brand": parsed.get("card_brand") or "",
+        "due_date": _normalize_date(parsed.get("due_date")),
         "items": norm,
     }
 
@@ -458,19 +624,23 @@ def _split_statement(text: str) -> list[str]:
     return chunks
 
 
-def _parse_statement_text(text: str, brand_hint: str = "") -> dict:
+def _parse_statement_text(text: str, brand_hint: str = "", due_date_hint: str = "") -> dict:
     if _estimate_tokens(text) + _estimate_tokens(_ATTACH_RULES) + 1000 <= TPM_BUDGET:
         result = _statement_call(text)
     else:
-        result = {"doc_type": "resumen_tarjeta", "card_brand": "", "items": []}
+        result = {"doc_type": "resumen_tarjeta", "card_brand": "", "due_date": "", "items": []}
         for i, chunk in enumerate(_split_statement(text)):
             part = _statement_call(chunk)
             if i == 0:
                 result["doc_type"] = part.get("doc_type") or "resumen_tarjeta"
                 result["card_brand"] = part.get("card_brand") or ""
+                result["due_date"] = part.get("due_date") or ""
             result["items"].extend(part.get("items") or [])
     if not result.get("card_brand") and brand_hint:
         result["card_brand"] = brand_hint
+    # El regex sobre el texto crudo es más confiable que el modelo: tiene prioridad.
+    if due_date_hint:
+        result["due_date"] = due_date_hint
     return result
 
 
@@ -480,8 +650,25 @@ def parse_attachment(file_bytes: bytes, mime_type: str) -> dict:
     mime_type = (mime_type or "").split(";")[0].strip().lower()
 
     if mime_type == "application/pdf":
-        text, brand_hint = _pdf_text(file_bytes)
-        return _normalize_result(_parse_statement_text(text, brand_hint))
+        pdf = _pdf_text(file_bytes)
+
+        # 1) Parser determinístico (formato BBVA). Es fiel y no gasta cuota.
+        regex_items = _extract_consumos_regex(pdf.consumos)
+        if len(regex_items) >= 2:
+            parsed = {
+                "doc_type": "resumen_tarjeta",
+                "card_brand": pdf.brand,
+                "due_date": pdf.due_date,
+                "items": regex_items,
+            }
+        else:
+            # 2) Fallback: el modelo (otros bancos / tickets sueltos).
+            parsed = _parse_statement_text(pdf.llm_text, pdf.brand, pdf.due_date)
+
+        result = _normalize_result(parsed)
+        if result.get("doc_type") != "resumen_tarjeta":
+            result["due_date"] = ""  # un ticket suelto no se imputa por vencimiento
+        return result
 
     # Imagen: sólo si hay un modelo con visión configurado
     if mime_type in ("image/jpeg", "image/png", "image/webp"):

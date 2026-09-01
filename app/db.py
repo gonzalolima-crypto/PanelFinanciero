@@ -1,8 +1,13 @@
 """Acceso a la base de datos SQLite.
 
 Tablas:
-  movements(id, type, date, category, amount, note, created_at)
+  movements(id, type, date, effective_date, category, amount, note, created_at)
   config(key, value)
+
+`date`            = fecha real del movimiento / de la compra.
+`effective_date`  = fecha con la que se imputa a un mes. Para casi todo es
+                    igual a `date`; para los consumos de un resumen de tarjeta
+                    es la fecha de vencimiento del resumen (ahí se paga).
 """
 import sqlite3
 from typing import Any
@@ -13,13 +18,14 @@ from . import config
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS movements (
-    id          TEXT PRIMARY KEY,
-    type        TEXT NOT NULL,
-    date        TEXT NOT NULL,
-    category    TEXT,
-    amount      REAL NOT NULL,
-    note        TEXT,
-    created_at  TEXT NOT NULL
+    id             TEXT PRIMARY KEY,
+    type           TEXT NOT NULL,
+    date           TEXT NOT NULL,
+    effective_date TEXT NOT NULL,
+    category       TEXT,
+    amount         REAL NOT NULL,
+    note           TEXT,
+    created_at     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_movements_date ON movements(date);
 
@@ -28,6 +34,18 @@ CREATE TABLE IF NOT EXISTS config (
     value TEXT NOT NULL
 );
 """
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Migraciones simples para bases creadas con versiones anteriores."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(movements)")}
+    if "effective_date" not in cols:
+        conn.execute("ALTER TABLE movements ADD COLUMN effective_date TEXT")
+        conn.execute(
+            "UPDATE movements SET effective_date = date "
+            "WHERE effective_date IS NULL OR effective_date = ''"
+        )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_movements_effdate ON movements(effective_date)")
 
 DEFAULT_CONFIG = {
     "goalPct": "20",
@@ -54,6 +72,7 @@ def init_db() -> None:
     conn = sqlite3.connect(config.DB_PATH)
     try:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         for key, value in DEFAULT_CONFIG.items():
             conn.execute(
                 "INSERT OR IGNORE INTO config(key, value) VALUES (?, ?)",

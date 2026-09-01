@@ -117,6 +117,20 @@ en el celular, al ver la foto, usá **Compartir → Imprimir → Guardar como PD
 en Windows, abrí la imagen y usá **Imprimir → "Microsoft Print to PDF"**.
 (Si más adelante querés subir fotos directamente, se puede activar: pedímelo.)
 
+### En qué mes se cargan los consumos de un resumen de tarjeta
+
+Cuando subís un **resumen de tarjeta**, todos los consumos se imputan al
+**mes en que lo pagás**, es decir el de la **fecha de vencimiento** del resumen
+(no el mes en que hiciste cada compra). Es donde realmente te impacta el gasto.
+
+- En la pantalla de revisión se muestra la fecha de vencimiento detectada y
+  "→ se carga en \<mes\>". Si el resumen tiene un formato que la app no reconoce,
+  te pide que elijas vos esa fecha antes de cargar.
+- En la tabla **Movimientos** vas a ver la **fecha real de cada compra**, con una
+  aclaración chica "se paga \<mes\>" cuando cae en otro mes.
+- Esto **solo** aplica a los resúmenes en PDF. Los "gastos con tarjeta" que
+  cargás a mano o por voz usan la fecha que vos ponés.
+
 ### ¿Dónde quedan mis datos?
 
 En un archivo de base de datos local: **`data/panel.db`**.

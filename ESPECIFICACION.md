@@ -3,8 +3,12 @@
 Documento de desarrollo guiado por especificaciones (SDD). Refleja lo acordado
 en la reunión del 27/08/2026 (`tarea.md`) y las respuestas posteriores.
 
-> Cambio 01/09/2026: el proveedor de IA pasó de Google Gemini a **Groq**
+> Cambio 01/09/2026 (a): el proveedor de IA pasó de Google Gemini a **Groq**
 > (clave provista por el usuario). Ver sección 4.
+>
+> Cambio 01/09/2026 (b): los consumos de un **resumen de tarjeta** se imputan al
+> mes de la **fecha de vencimiento** (VENCIMIENTO ACTUAL), no al mes de cada
+> compra. Nuevo campo `movements.effective_date`. Ver secciones 3.1 y 4.
 
 ## 1. Objetivo
 
@@ -72,11 +76,19 @@ Flask (app/)  ──►  SQLite3 (data/panel.db)
 
 ```sql
 movements(
-  id TEXT PK, type TEXT, date TEXT (YYYY-MM-DD),
+  id TEXT PK, type TEXT,
+  date TEXT (YYYY-MM-DD),            -- fecha real de la compra / del movimiento
+  effective_date TEXT (YYYY-MM-DD),  -- fecha con la que se imputa a un mes
   category TEXT, amount REAL, note TEXT, created_at TEXT
 )
 config(key TEXT PK, value TEXT)   -- hoy: goalPct
 ```
+
+`effective_date` = `date` para casi todo. Para los consumos de un resumen de
+tarjeta es la **fecha de vencimiento** del resumen. Todos los agrupamientos por
+mes (recibo, gráficos, selector de mes) usan `effective_date`; la tabla de
+movimientos muestra `date`. Migración automática para bases previas
+(`_migrate()` en `app/db.py`, backfill `effective_date = date`).
 
 ### 3.2 API HTTP
 
@@ -121,6 +133,8 @@ está configurada.
 | Groq (nivel gratuito) | Clave provista por el usuario. API compatible con OpenAI. Incluye Whisper para audio. Proveedor/modelo intercambiable por variables de entorno. |
 | Comprobantes: extraer texto del PDF + estructurar con LLM | La cuenta de Groq del usuario no tiene modelo con visión. Los resúmenes del banco son PDF con texto seleccionable, así que la extracción con PyMuPDF es 100 % fiel y además usa menos tokens que enviar imágenes. |
 | "Focalizar" el texto del resumen antes de mandarlo | El plan gratuito de Groq tiene un límite bajo de tokens por minuto (~8000, e incluye el `max_tokens` de salida). `_focus_statement()` deja sólo los bloques "Consumos … / TOTAL CONSUMOS DE …" (de ~13 KB a <1 KB). Si aún así no entra, `_split_statement()` lo parte por titular y hace varias llamadas. |
+| Parser determinístico de consumos (`_extract_consumos_regex`) | El formato BBVA Visa/Mastercard es regular (fecha / descripción / cupón / monto). Se extraen los consumos con regex + categorización por palabras clave (`_categorize`). Rápido, exacto, sin cuota, y **sin la inconsistencia del LLM** (que a veces devolvía 15 de 27 ítems). El modelo queda solo de fallback para PDFs que el regex no reconoce (otros bancos, tickets sueltos). |
+| Fecha de vencimiento: regex primero, LLM de respaldo | `_extract_due_date()` busca "VENCIMIENTO ACTUAL" en el texto crudo. Si falla, se le pasa al modelo un encabezado acotado y devuelve `due_date` en el JSON. Si ninguno la encuentra, el frontend la pide al usuario. |
 | Deducir tipo de archivo por extensión | Algunos navegadores/Windows no informan el MIME al subir; el backend lo deduce de la extensión del nombre. |
 | `GROQ_VISION_MODEL` opcional | Si en el futuro se habilita un modelo con visión, basta setear la variable y las fotos JPG/PNG funcionan sin cambios de código. |
 | API key en el backend | El prototipo la exponía en el navegador. Riesgo de robo de clave y de cuota. |

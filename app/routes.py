@@ -37,6 +37,7 @@ def create_movement():
             amount=data.get("amount", 0),
             category=data.get("category", ""),
             note=data.get("note", ""),
+            effective_date=data.get("effective_date") or None,
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -60,6 +61,7 @@ def create_movements_bulk():
                     amount=it.get("amount", 0),
                     category=it.get("category", ""),
                     note=it.get("note", ""),
+                    effective_date=it.get("effective_date") or None,
                 )
             )
         except ValueError as exc:

@@ -1,6 +1,6 @@
 /* Panel Financiero — frontend
    Habla con el backend Flask por /api/*. La interpretación de voz y de
-   comprobantes la hace Gemini del lado del servidor. */
+   comprobantes la hace Groq del lado del servidor. */
 
 const CATS = {
   gasto_diario: ["Alimentos","Transporte","Salud","Ocio","Servicios","Hogar","Otros"],
@@ -27,6 +27,11 @@ const monthLabel = key => {
   const names = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
   return names[parseInt(m,10)-1] + " " + y;
 };
+// Fecha con la que un movimiento se imputa a un mes. Para casi todo es la
+// fecha real; para los consumos de un resumen de tarjeta es la fecha de
+// vencimiento (el mes en que se paga).
+const effDate = m => m.effective_date || m.date;
+const effMonth = m => monthKey(effDate(m));
 
 /* ---- API helpers ---- */
 async function api(path, opts){
@@ -63,7 +68,7 @@ function populateCategories(){
 function populateMonthSelect(){
   const sel = document.getElementById('monthSelect');
   const cur = todayISO().slice(0,7);
-  const set = new Set(movements.map(m=>monthKey(m.date)));
+  const set = new Set(movements.map(effMonth));
   set.add(cur);
   const months = Array.from(set).sort().reverse();
   const prevVal = sel.value || cur;
@@ -71,7 +76,7 @@ function populateMonthSelect(){
   sel.value = months.includes(prevVal) ? prevVal : cur;
 }
 
-function monthMovements(mk){ return movements.filter(m=>monthKey(m.date)===mk); }
+function monthMovements(mk){ return movements.filter(m=>effMonth(m)===mk); }
 function sumBy(list, type){ return list.filter(m=>m.type===type).reduce((a,m)=>a+m.amount,0); }
 
 function renderReceipt(){
@@ -117,8 +122,10 @@ function renderTable(){
   tbody.innerHTML = list.map(m=>{
     const sign = m.type.startsWith('ingreso') ? '+' : '−';
     const color = m.type.startsWith('ingreso') ? 'var(--green)' : (m.type==='impuesto'?'var(--amber)':'var(--coral)');
+    const imputado = monthKey(m.date) !== effMonth(m)
+      ? `<div style="color:var(--ink-faint);font-size:10px;">se paga ${monthLabel(effMonth(m))}</div>` : '';
     return `<tr>
-      <td>${m.date}</td>
+      <td>${m.date}${imputado}</td>
       <td><span class="tag ${m.type}">${TYPE_LABEL[m.type]}</span></td>
       <td class="cat">${escapeHtml(m.category||'—')}</td>
       <td class="cat" style="color:var(--ink-faint)">${escapeHtml(m.note||'')}</td>
@@ -158,8 +165,13 @@ function renderDailyCharts(){
   const labels = Array.from({length:nDays}, (_,i)=> String(i+1).padStart(2,'0'));
   const diarioData = new Array(nDays).fill(0);
   const tarjetaData = new Array(nDays).fill(0);
+  // Se ubica cada gasto en el DÍA REAL de la compra (m.date), aunque el mes
+  // mostrado sea el de imputación (vencimiento). Si el día no existe en ese
+  // mes, se acota al último día.
   monthMovements(mk).forEach(m=>{
-    const day = parseInt(m.date.slice(8,10),10)-1;
+    let day = parseInt(m.date.slice(8,10),10) - 1;
+    if(isNaN(day)) return;
+    day = Math.max(0, Math.min(day, nDays-1));
     if(m.type==='gasto_diario') diarioData[day]+=m.amount;
     if(m.type==='gasto_tarjeta') tarjetaData[day]+=m.amount;
   });
@@ -476,6 +488,7 @@ async function handleFileSelected(file){
       fileName: parsed.fileName || file.name,
       cardBrand: parsed.card_brand || '',
       docType: parsed.doc_type || 'ticket',
+      dueDate: parsed.due_date || '',          // fecha de vencimiento detectada (o '')
       groups
     };
     renderAttachmentReview();
@@ -485,6 +498,32 @@ async function handleFileSelected(file){
   }finally{
     setAttachBusy(false);
   }
+}
+
+function updateImpMonth(){
+  const v = (document.getElementById('reviewDueDate')||{}).value || '';
+  document.getElementById('reviewImpMonth').textContent =
+    v ? '→ se carga en ' + monthLabel(monthKey(v)) : '';
+}
+
+function renderImputacion(){
+  const box = document.getElementById('reviewImputacion');
+  const input = document.getElementById('reviewDueDate');
+  if(!pendingAttachment || pendingAttachment.docType !== 'resumen_tarjeta'){
+    box.style.display = 'none';
+    return;
+  }
+  box.style.display = 'block';
+  if(!input.value) input.value = pendingAttachment.dueDate || '';
+  box.classList.toggle('warn', !input.value);
+  document.getElementById('reviewImpLabel').textContent = pendingAttachment.dueDate
+    ? 'Los consumos de este resumen se imputan al mes en que lo pagás (vencimiento). En el detalle vas a ver la fecha real de cada compra.'
+    : 'No se detectó la fecha de vencimiento. Indicá cuándo pagás este resumen: los consumos se cargan en ese mes.';
+  updateImpMonth();
+  input.onchange = ()=>{
+    box.classList.toggle('warn', !input.value);
+    updateImpMonth();
+  };
 }
 
 function renderAttachmentReview(){
@@ -497,6 +536,8 @@ function renderAttachmentReview(){
     : (pendingAttachment.docType==='ticket' ? 'Ticket' : 'Resumen');
   const totalItems = Object.values(pendingAttachment.groups).reduce((a,g)=>a+g.items.length,0);
   document.getElementById('reviewCount').textContent = totalItems + (totalItems===1 ? ' consumo' : ' consumos');
+
+  renderImputacion();
 
   const wrap = document.getElementById('reviewGroups');
   wrap.innerHTML = Object.entries(pendingAttachment.groups).map(([cat,g], idx)=>{
@@ -535,18 +576,33 @@ function renderAttachmentReview(){
 
 async function confirmAttachment(){
   if(!pendingAttachment) return;
-  const type = (pendingAttachment.cardBrand || pendingAttachment.docType==='resumen_tarjeta') ? 'gasto_tarjeta' : 'gasto_diario';
+  const isResumen = pendingAttachment.docType === 'resumen_tarjeta';
+  const type = (pendingAttachment.cardBrand || isResumen) ? 'gasto_tarjeta' : 'gasto_diario';
+
+  let eff = '';
+  if(isResumen){
+    eff = (document.getElementById('reviewDueDate').value || '').trim();
+    if(!eff){
+      document.getElementById('reviewImputacion').classList.add('warn');
+      document.getElementById('reviewDueDate').focus();
+      document.getElementById('attachStatus').textContent = 'Indicá la fecha de vencimiento antes de cargar.';
+      return;
+    }
+  }
+
   const payload = [];
   Object.entries(pendingAttachment.groups).forEach(([cat,g])=>{
     if(!g.included) return;
     g.items.forEach(it=>{
-      payload.push({
+      const mv = {
         type,
         date: it.date,
         category: cat,
         amount: it.amount,
         note: (it.merchant ? it.merchant+' — ' : '') + pendingAttachment.fileName
-      });
+      };
+      if(eff) mv.effective_date = eff;
+      payload.push(mv);
     });
   });
   if(!payload.length){ cancelAttachment(); return; }
@@ -568,6 +624,8 @@ async function confirmAttachment(){
 function cancelAttachment(){
   pendingAttachment = null;
   document.getElementById('reviewCard').style.display = 'none';
+  document.getElementById('reviewImputacion').style.display = 'none';
+  document.getElementById('reviewDueDate').value = '';
   document.getElementById('fileInput').value = '';
 }
 

@@ -68,6 +68,38 @@ def test_movimiento_invalido(client):
     assert r.status_code == 400
 
 
+def test_effective_date(client):
+    # sin effective_date -> igual a date
+    r = client.post("/api/movements", json={
+        "type": "gasto_diario", "date": "2026-08-10", "amount": 100, "category": "Otros"
+    })
+    assert r.json["effective_date"] == "2026-08-10"
+
+    # con effective_date (consumo de resumen: compra en julio, vence en agosto)
+    r = client.post("/api/movements", json={
+        "type": "gasto_tarjeta", "date": "2026-07-15", "amount": 5000,
+        "category": "Alimentos", "effective_date": "2026-08-07"
+    })
+    assert r.status_code == 201
+    assert r.json["date"] == "2026-07-15"
+    assert r.json["effective_date"] == "2026-08-07"
+
+    lst = client.get("/api/movements").json
+    assert all("effective_date" in m for m in lst)
+
+
+def test_bulk_con_effective_date(client):
+    r = client.post("/api/movements/bulk", json={"movements": [
+        {"type": "gasto_tarjeta", "date": "2026-06-30", "amount": 1200,
+         "category": "Transporte", "effective_date": "2026-08-07"},
+        {"type": "gasto_tarjeta", "date": "2026-07-02", "amount": 3400,
+         "category": "Ocio", "effective_date": "2026-08-07"},
+    ]})
+    assert r.status_code == 201
+    assert len(r.json["created"]) == 2
+    assert {m["effective_date"] for m in r.json["created"]} == {"2026-08-07"}
+
+
 def test_config(client):
     assert client.get("/api/config").json["goalPct"] == 20
     r = client.put("/api/config", json={"goalPct": 35})
@@ -78,3 +110,28 @@ def test_voz_sin_apikey_devuelve_502(client):
     r = client.post("/api/voice/parse", json={"text": "gasté 5000 en el super"})
     assert r.status_code == 502
     assert "Groq" in r.json["error"]
+
+
+def test_parser_consumos_bbva():
+    """El parser determinístico extrae los consumos sin llamar a Groq."""
+    from app import llm
+
+    texto = "\n".join([
+        "Consumos Juan Perez",
+        "FECHA", "DESCRIPCIÓN", "NRO. CUPÓN", "PESOS", "DÓLARES",
+        "05-Jul-26", "SPOTIFY                  USD        2,99", "834921", "2,99",
+        "15-Jul-26", "COTO DIGITAL SUC 215", "005186", "355.776,39",
+        "17-Jul-26", "TELEPEAJE PLUS   00034492", "000001", "80,06",
+        "30-Jul-26", "COTO DIGITAL DEVOLUCION", "008670", "-2.812,87",
+        "TOTAL CONSUMOS DE JUAN PEREZ",
+    ])
+    items = llm._extract_consumos_regex(texto)
+    assert len(items) == 4
+    coto = next(i for i in items if i["amount"] > 300000)
+    assert coto["date"] == "2026-07-15"
+    assert coto["category"] == "Alimentos"
+    spot = next(i for i in items if "SPOTIFY" in i["merchant"].upper())
+    assert "(USD)" in spot["merchant"] and spot["category"] == "Suscripciones"
+
+    assert llm._extract_due_date("VENCIMIENTO ACTUAL\n07-Ago-26\n") == "2026-08-07"
+    assert llm._extract_due_date("VENCIMIENTO ANTERIOR\n06-Jul-26\nsin actual") == ""

@@ -1,9 +1,12 @@
 """Operaciones sobre movimientos y configuración."""
 from datetime import datetime, timezone
+import re
 import secrets
 from typing import Optional
 
 from .db import get_db
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # Tipos de movimiento válidos (mismo modelo que el prototipo)
 VALID_TYPES = {
@@ -21,7 +24,7 @@ def _new_id() -> str:
 
 def list_movements() -> list[dict]:
     rows = get_db().execute(
-        "SELECT id, type, date, category, amount, note "
+        "SELECT id, type, date, effective_date, category, amount, note "
         "FROM movements ORDER BY date DESC, created_at DESC"
     ).fetchall()
     return [dict(r) for r in rows]
@@ -34,6 +37,7 @@ def add_movement(
     amount: float,
     category: Optional[str] = "",
     note: Optional[str] = "",
+    effective_date: Optional[str] = None,
 ) -> dict:
     if type not in VALID_TYPES:
         raise ValueError(f"tipo inválido: {type}")
@@ -43,21 +47,26 @@ def add_movement(
         raise ValueError("monto inválido")
     if amount <= 0:
         raise ValueError("el monto debe ser mayor a cero")
-    if not date or len(date) != 10:
+    if not date or not _DATE_RE.match(date):
         raise ValueError("fecha inválida (se espera YYYY-MM-DD)")
+
+    eff = effective_date or date
+    if not _DATE_RE.match(eff):
+        raise ValueError("fecha de imputación inválida (se espera YYYY-MM-DD)")
 
     mv = {
         "id": _new_id(),
         "type": type,
         "date": date,
+        "effective_date": eff,
         "category": (category or "").strip(),
         "amount": amount,
         "note": (note or "").strip(),
     }
     db = get_db()
     db.execute(
-        "INSERT INTO movements(id, type, date, category, amount, note, created_at) "
-        "VALUES (:id, :type, :date, :category, :amount, :note, :created_at)",
+        "INSERT INTO movements(id, type, date, effective_date, category, amount, note, created_at) "
+        "VALUES (:id, :type, :date, :effective_date, :category, :amount, :note, :created_at)",
         {**mv, "created_at": datetime.now(timezone.utc).isoformat()},
     )
     db.commit()
