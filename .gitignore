@@ -28,3 +28,7 @@ Comprobantes/
 run_out.txt
 run_err.txt
 browser_would_open.txt
+
+# Backups del proyecto (quedan solo en tu maquina)
+*.zip
+_backup/
