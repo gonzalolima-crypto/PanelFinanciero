@@ -12,7 +12,8 @@ const CATS_GASTO = [
 const CATS = {
   gasto_diario: CATS_GASTO,
   gasto_tarjeta: CATS_GASTO,
-  impuesto: ["Ganancias","IIBB","Monotributo","ABL/Municipal","Patente","Otros"],
+  impuesto: ["Luz","Gas","VTV","ARBA","Municipal","Aysa","Expensas","Luz Edificio","Carga Celular",
+             "Ganancias","IIBB","Monotributo","ABL/Municipal","Patente","Otros"],
   ingreso_sueldo: [],
   ingreso_extra: ["Freelance","Venta","Bono","Regalo","Otros"]
 };

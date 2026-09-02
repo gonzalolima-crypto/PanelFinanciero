@@ -35,7 +35,10 @@ CATS_GASTO = [
     "Gastos Viajes", "Regalos", "Ropa", "Gastos Padres",
     "Alimentos", "Transporte", "Salud", "Ocio", "Servicios", "Hogar", "Suscripciones", "Otros",
 ]
-CATS_IMPUESTO = ["Ganancias", "IIBB", "Monotributo", "ABL/Municipal", "Patente", "Otros"]
+CATS_IMPUESTO = [
+    "Luz", "Gas", "VTV", "ARBA", "Municipal", "Aysa", "Expensas", "Luz Edificio", "Carga Celular",
+    "Ganancias", "IIBB", "Monotributo", "ABL/Municipal", "Patente", "Otros",
+]
 CATS_INGRESO_EXTRA = ["Freelance", "Venta", "Bono", "Regalo", "Otros"]
 
 TIMEOUT = 90
@@ -189,7 +192,7 @@ def parse_voice(text: str) -> dict:
 {{"type":"gasto_diario|gasto_tarjeta|impuesto|ingreso_sueldo|ingreso_extra","date":"YYYY-MM-DD","category":"string","amount":number,"note":"string breve"}}
 
 Reglas:
-- type: "gasto_tarjeta" si menciona tarjeta/crédito/débito con tarjeta; "impuesto" si menciona un impuesto o tasa (ganancias, IIBB, monotributo, ABL, municipal, patente, etc); "ingreso_sueldo" si menciona sueldo/salario/haberes; "ingreso_extra" para otros ingresos (freelance, venta, bono, regalo, changa); si no aplica ninguno de los anteriores y es un gasto, usar "gasto_diario".
+- type: "gasto_tarjeta" si menciona tarjeta/crédito/débito con tarjeta; "impuesto" si menciona un impuesto, tasa o SERVICIO / factura recurrente (ganancias, IIBB, monotributo, ABL, municipal, patente, ARBA, VTV, luz, gas, agua, Aysa, expensas, luz del edificio, carga de celular/crédito del celular); "ingreso_sueldo" si menciona sueldo/salario/haberes; "ingreso_extra" para otros ingresos (freelance, venta, bono, regalo, changa); si no aplica ninguno de los anteriores y es un gasto, usar "gasto_diario".
 - category: para gasto_diario/gasto_tarjeta elegir UNA de {CATS_GASTO}. Para impuesto elegir de {CATS_IMPUESTO}. Para ingreso_extra elegir de {CATS_INGRESO_EXTRA}. Para ingreso_sueldo usar "".
 - date: hoy es {_today()}. Si dice "ayer" restar un día. Si no menciona fecha, usar {_today()}. Formato YYYY-MM-DD.
 - amount: número en pesos argentinos, sin puntos ni símbolos ni texto (si dice "15 mil" es 15000, si dice "un palo" es 1000000).

@@ -188,6 +188,15 @@ Servicios, Hogar, Suscripciones, Otros.
   `CATS_GASTO`, arriba) y `app/llm.py` (constante `CATS_GASTO` y, si querés que
   la app las adivine sola, el mapa `_CAT_KEYWORDS`). Pedímelo y lo hago.
 
+### Categorías de "Impuesto pagado"
+
+Además de impuestos, este tipo se usa para servicios y facturas recurrentes:
+Luz, Gas, VTV, ARBA, Municipal, Aysa, Expensas, Luz Edificio, Carga Celular,
+Ganancias, IIBB, Monotributo, ABL/Municipal, Patente, Otros.
+Al dictarlo por voz ("pagué la luz", "cargué el celular") la app lo reconoce y
+elige la categoría sola. Se editan en `CATS.impuesto` (app.js) y `CATS_IMPUESTO`
+(llm.py).
+
 ### Cambiar el objetivo de ahorro por defecto (hoy 20%)
 
 `app/db.py` → `DEFAULT_CONFIG = {"goalPct": "20"}`.
