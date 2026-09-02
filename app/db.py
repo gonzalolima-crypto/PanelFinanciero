@@ -1,7 +1,7 @@
 """Acceso a la base de datos SQLite.
 
 Tablas:
-  movements(id, type, date, effective_date, category, amount, note, created_at)
+  movements(id, type, date, effective_date, category, amount, currency, note, created_at)
   config(key, value)
 
 `date`            = fecha real del movimiento / de la compra.
@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS movements (
     effective_date TEXT NOT NULL,
     category       TEXT,
     amount         REAL NOT NULL,
+    currency       TEXT NOT NULL DEFAULT 'ARS',
     note           TEXT,
     created_at     TEXT NOT NULL
 );
@@ -45,6 +46,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
             "UPDATE movements SET effective_date = date "
             "WHERE effective_date IS NULL OR effective_date = ''"
         )
+    if "currency" not in cols:
+        conn.execute("ALTER TABLE movements ADD COLUMN currency TEXT NOT NULL DEFAULT 'ARS'")
+        conn.execute("UPDATE movements SET currency = 'ARS' WHERE currency IS NULL OR currency = ''")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_movements_effdate ON movements(effective_date)")
 
 DEFAULT_CONFIG = {

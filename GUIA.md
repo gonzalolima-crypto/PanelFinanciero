@@ -131,6 +131,33 @@ Cuando subís un **resumen de tarjeta**, todos los consumos se imputan al
 - Esto **solo** aplica a los resúmenes en PDF. Los "gastos con tarjeta" que
   cargás a mano o por voz usan la fecha que vos ponés.
 
+### Pesos y dólares (dos monedas)
+
+El panel maneja las dos monedas por separado:
+
+- El **Resumen del mes** tiene un bloque **En pesos ($)** y otro **En dólares (US$)**,
+  cada uno con sus ingresos, gastos, tarjeta y ahorro.
+- Cada movimiento tiene su moneda. En la carga manual elegís **$ ARS** o **US$ USD**.
+- Al subir un resumen, los consumos en dólares se cargan con su **valor literal en
+  dólares** (ej. Spotify US$ 2,99), no convertidos a pesos.
+- Los **gráficos** van siempre en pesos (los consumos en dólares se ven en el
+  bloque US$ del resumen).
+
+### Reconciliación con el resumen de la tarjeta
+
+Al subir un resumen, antes de confirmar ves un recuadro **"Reconciliación con tu
+resumen"** que muestra:
+
+- Consumos en pesos y en dólares, y las **devoluciones/reintegros** (que restan).
+- **"Se carga al panel"**: el neto que van a sumar tus gastos de tarjeta.
+- **Cargos del resumen** (IIBB, IVA RG, Percepción RG 5617 / impuesto dólar
+  tarjeta, etc.): se listan para que los veas, pero **no se cargan** como gasto.
+- El **SALDO ACTUAL** del resumen (lo que pagás en el banco).
+- Un tilde verde si los consumos cargados coinciden con el total de consumos del
+  resumen.
+
+Así podés cuadrar: `consumos que carga el panel + cargos del resumen = SALDO ACTUAL`.
+
 ### ¿Dónde quedan mis datos?
 
 En un archivo de base de datos local: **`data/panel.db`**.

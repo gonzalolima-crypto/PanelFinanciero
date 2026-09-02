@@ -20,6 +20,9 @@ let config = { goalPct: 20 };
 let charts = {};
 
 const fmt = n => "$ " + Math.round(n).toLocaleString("es-AR");
+const fmtUsd = n => "US$ " + Number(n||0).toLocaleString("es-AR", {minimumFractionDigits:2, maximumFractionDigits:2});
+const fmtCur = (n, cur) => cur === 'USD' ? fmtUsd(n) : fmt(n);
+const curOf = m => (m.currency || 'ARS');
 const todayISO = () => new Date().toISOString().slice(0,10);
 const monthKey = d => d.slice(0,7);
 const monthLabel = key => {
@@ -77,7 +80,11 @@ function populateMonthSelect(){
 }
 
 function monthMovements(mk){ return movements.filter(m=>effMonth(m)===mk); }
-function sumBy(list, type){ return list.filter(m=>m.type===type).reduce((a,m)=>a+m.amount,0); }
+function sumBy(list, type, cur){
+  cur = cur || 'ARS';
+  return list.filter(m=>m.type===type && curOf(m)===cur).reduce((a,m)=>a+m.amount,0);
+}
+function monthHasUsd(list){ return list.some(m=>curOf(m)==='USD'); }
 
 function renderReceipt(){
   const mk = document.getElementById('monthSelect').value;
@@ -100,6 +107,21 @@ function renderReceipt(){
   ahorroEl.textContent = fmt(ahorro);
   ahorroEl.className = 'val total ' + (ahorro>=0 ? 'pos':'neg');
 
+  // --- bloque en dólares ---
+  const uIngresos = sumBy(list,'ingreso_sueldo','USD') + sumBy(list,'ingreso_extra','USD');
+  const uDiario = sumBy(list,'gasto_diario','USD');
+  const uTarjeta = sumBy(list,'gasto_tarjeta','USD');
+  const uImpuestos = sumBy(list,'impuesto','USD');
+  const uAhorro = uIngresos - (uDiario+uTarjeta+uImpuestos);
+  document.getElementById('uIngresos').textContent = fmtUsd(uIngresos);
+  document.getElementById('uGastoDiario').textContent = fmtUsd(uDiario);
+  document.getElementById('uGastoTarjeta').textContent = fmtUsd(uTarjeta);
+  document.getElementById('uImpuestos').textContent = fmtUsd(uImpuestos);
+  const uAhorroEl = document.getElementById('uAhorro');
+  uAhorroEl.textContent = fmtUsd(uAhorro);
+  uAhorroEl.className = 'val total ' + (uAhorro>=0 ? 'pos':'neg');
+  document.getElementById('usdBlock').classList.toggle('empty', !monthHasUsd(list));
+
   const realPct = ingresos>0 ? (ahorro/ingresos*100) : 0;
   const goalPct = config.goalPct;
   document.getElementById('goalPctLabel').textContent = goalPct+'%';
@@ -120,16 +142,21 @@ function renderTable(){
   document.getElementById('countLabel').textContent = list.length + ' movimiento(s)';
   document.getElementById('emptyMsg').style.display = list.length? 'none':'block';
   tbody.innerHTML = list.map(m=>{
-    const sign = m.type.startsWith('ingreso') ? '+' : '−';
-    const color = m.type.startsWith('ingreso') ? 'var(--green)' : (m.type==='impuesto'?'var(--amber)':'var(--coral)');
+    const isIngreso = m.type.startsWith('ingreso');
+    const isReintegro = !isIngreso && m.amount < 0;   // devolución en un gasto
+    const sign = (isIngreso || isReintegro) ? '+' : '−';
+    const color = (isIngreso || isReintegro) ? 'var(--green)'
+      : (m.type==='impuesto' ? 'var(--amber)' : 'var(--coral)');
     const imputado = monthKey(m.date) !== effMonth(m)
       ? `<div style="color:var(--ink-faint);font-size:10px;">se paga ${monthLabel(effMonth(m))}</div>` : '';
+    const cur = curOf(m);
+    const nota = (m.note||'') + (isReintegro ? ' · reintegro' : '');
     return `<tr>
       <td>${m.date}${imputado}</td>
-      <td><span class="tag ${m.type}">${TYPE_LABEL[m.type]}</span></td>
+      <td><span class="tag ${m.type}">${TYPE_LABEL[m.type]}${cur==='USD' ? ' · US$' : ''}</span></td>
       <td class="cat">${escapeHtml(m.category||'—')}</td>
-      <td class="cat" style="color:var(--ink-faint)">${escapeHtml(m.note||'')}</td>
-      <td style="text-align:right;color:${color};font-weight:600;">${sign} ${fmt(m.amount)}</td>
+      <td class="cat" style="color:var(--ink-faint)">${escapeHtml(nota)}</td>
+      <td style="text-align:right;color:${color};font-weight:600;">${sign} ${fmtCur(Math.abs(m.amount), cur)}</td>
       <td><button class="btn secondary" data-id="${m.id}">borrar</button></td>
     </tr>`;
   }).join('');
@@ -167,8 +194,10 @@ function renderDailyCharts(){
   const tarjetaData = new Array(nDays).fill(0);
   // Se ubica cada gasto en el DÍA REAL de la compra (m.date), aunque el mes
   // mostrado sea el de imputación (vencimiento). Si el día no existe en ese
-  // mes, se acota al último día.
+  // mes, se acota al último día. Los gráficos van en pesos (los consumos en
+  // dólares se ven en el bloque US$ del resumen).
   monthMovements(mk).forEach(m=>{
+    if(curOf(m)!=='ARS') return;
     let day = parseInt(m.date.slice(8,10),10) - 1;
     if(isNaN(day)) return;
     day = Math.max(0, Math.min(day, nDays-1));
@@ -250,7 +279,7 @@ function renderMonthlyCharts(){
 
 function renderCategoryChart(){
   const mk = document.getElementById('monthSelect').value;
-  const list = monthMovements(mk).filter(m=> m.type==='gasto_diario' || m.type==='gasto_tarjeta');
+  const list = monthMovements(mk).filter(m=> (m.type==='gasto_diario' || m.type==='gasto_tarjeta') && curOf(m)==='ARS' && m.amount>0);
   const byCat = {};
   list.forEach(m=>{ byCat[m.category] = (byCat[m.category]||0) + m.amount; });
   const labels = Object.keys(byCat);
@@ -287,6 +316,7 @@ async function addMovement(){
   const date = document.getElementById('fDate').value || todayISO();
   const amount = parseFloat(document.getElementById('fAmount').value);
   const category = CATS[type].length ? document.getElementById('fCat').value : '';
+  const currency = document.getElementById('fCurrency').value;
   const note = document.getElementById('fNote').value.trim();
 
   if(!amount || amount<=0){ setStatus('Ingresá un monto válido.'); return; }
@@ -295,7 +325,7 @@ async function addMovement(){
     const mv = await api('/api/movements', {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({ type, date, category, amount, note })
+      body: JSON.stringify({ type, date, category, amount, note, currency })
     });
     movements.unshift(mv);
     document.getElementById('fAmount').value='';
@@ -482,13 +512,19 @@ async function handleFileSelected(file){
     (parsed.items||[]).forEach(it=>{
       const cat = it.category && it.category.trim() ? it.category.trim() : 'Otros';
       if(!groups[cat]) groups[cat] = { items:[], included:true };
-      groups[cat].items.push({ date: it.date, merchant: it.merchant || '', amount: Number(it.amount)||0 });
+      groups[cat].items.push({
+        date: it.date,
+        merchant: it.merchant || '',
+        amount: Number(it.amount)||0,
+        currency: (it.currency === 'USD') ? 'USD' : 'ARS'
+      });
     });
     pendingAttachment = {
       fileName: parsed.fileName || file.name,
       cardBrand: parsed.card_brand || '',
       docType: parsed.doc_type || 'ticket',
       dueDate: parsed.due_date || '',          // fecha de vencimiento detectada (o '')
+      recon: parsed.reconciliation || null,
       groups
     };
     renderAttachmentReview();
@@ -539,10 +575,22 @@ function renderAttachmentReview(){
 
   renderImputacion();
 
+  const sumCur = (items, cur) => items.filter(i=>i.currency===cur).reduce((a,i)=>a+i.amount,0);
+  const money = (ars, usd) => {
+    const parts = [];
+    if(ars || !usd) parts.push(fmt(ars));
+    if(usd) parts.push(fmtUsd(usd));
+    return parts.join('  +  ');
+  };
+
   const wrap = document.getElementById('reviewGroups');
   wrap.innerHTML = Object.entries(pendingAttachment.groups).map(([cat,g], idx)=>{
-    const sum = g.items.reduce((a,i)=>a+i.amount,0);
-    const itemsHtml = g.items.map(i=> `<div class="item-row"><span>${i.date} · ${escapeHtml(i.merchant||'—')}</span><span>${fmt(i.amount)}</span></div>`).join('');
+    const ars = sumCur(g.items,'ARS'), usd = sumCur(g.items,'USD');
+    const itemsHtml = g.items.map(i=>{
+      const neg = i.amount < 0;
+      return `<div class="item-row"><span>${i.date} · ${escapeHtml(i.merchant||'—')}${neg?' · reintegro':''}</span>`
+        + `<span${neg?' style="color:var(--green)"':''}>${(neg?'+ ':'')}${fmtCur(Math.abs(i.amount), i.currency)}</span></div>`;
+    }).join('');
     return `<div class="group ${g.included?'':'excluded'}" data-cat="${escapeHtml(cat)}">
       <div class="group-row">
         <div class="group-left">
@@ -550,7 +598,7 @@ function renderAttachmentReview(){
           <span class="group-name">${escapeHtml(cat)}</span>
           <span class="group-count">${g.items.length} ${g.items.length===1?'consumo':'consumos'}</span>
         </div>
-        <span class="group-sum" data-expand="${idx}">${fmt(sum)}</span>
+        <span class="group-sum" data-expand="${idx}">${money(ars, usd)}</span>
       </div>
       <div class="group-items" id="items-${idx}">${itemsHtml}</div>
     </div>`;
@@ -569,9 +617,52 @@ function renderAttachmentReview(){
     });
   });
 
-  const total = Object.values(pendingAttachment.groups).filter(g=>g.included)
-    .reduce((a,g)=>a+g.items.reduce((x,i)=>x+i.amount,0),0);
-  document.getElementById('reviewTotal').textContent = fmt(total);
+  const inc = Object.values(pendingAttachment.groups).filter(g=>g.included);
+  const totArs = inc.reduce((a,g)=>a+sumCur(g.items,'ARS'),0);
+  const totUsd = inc.reduce((a,g)=>a+sumCur(g.items,'USD'),0);
+  document.getElementById('reviewTotal').textContent = money(totArs, totUsd);
+
+  renderRecon();
+}
+
+function renderRecon(){
+  const el = document.getElementById('reviewRecon');
+  const r = pendingAttachment && pendingAttachment.recon;
+  if(!r){ el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  const a = r.app, st = r.statement, c = r.check;
+  const rr = (label, val, cls='') => `<div class="rr ${cls}"><span>${label}</span><span class="v">${val}</span></div>`;
+
+  let html = '<h4>Reconciliación con tu resumen</h4>';
+  html += rr('Consumos en pesos', fmt(a.consumos_ars));
+  if(a.consumos_usd) html += rr('Consumos en dólares', fmtUsd(a.consumos_usd));
+  if(a.devoluciones_ars) html += rr('Devoluciones / reintegros', '<span class="neg">'+fmt(a.devoluciones_ars)+'</span>');
+  if(a.devoluciones_usd) html += rr('Devoluciones en dólares', '<span class="neg">'+fmtUsd(a.devoluciones_usd)+'</span>');
+  html += rr('Se carga al panel', money2(a.neto_ars, a.neto_usd), 'tot');
+
+  if(st && st.cargos && st.cargos.length){
+    html += '<div class="note">Cargos del resumen (NO se cargan al panel — solo para que cuadres):</div>';
+    st.cargos.forEach(row=>{
+      html += rr(row.label, row.usd ? (fmt(row.ars)+'  '+fmtUsd(row.usd)) : fmt(row.ars), 'sub');
+    });
+    html += rr('Subtotal cargos', money2(c.cargos_total_ars, c.cargos_total_usd), 'sub');
+  }
+  if(c){
+    html += rr('SALDO ACTUAL del resumen', money2(c.saldo_actual_ars, c.saldo_actual_usd), 'saldo');
+    const ok = c.ok_ars && c.ok_usd;
+    html += `<div class="chk ${ok?'ok':'bad'}">`
+      + (ok
+         ? '✓ Los consumos cargados coinciden con el total de consumos del resumen.'
+         : 'Los consumos cargados no coinciden exactamente con el resumen (esperado: '
+           + money2(c.expected_ars, c.expected_usd) + '). Revisá los ítems.')
+      + '</div>';
+  }
+  el.innerHTML = html;
+}
+function money2(ars, usd){
+  const p = [fmt(ars)];
+  if(usd) p.push(fmtUsd(usd));
+  return p.join('  +  ');
 }
 
 async function confirmAttachment(){
@@ -599,6 +690,7 @@ async function confirmAttachment(){
         date: it.date,
         category: cat,
         amount: it.amount,
+        currency: it.currency || 'ARS',
         note: (it.merchant ? it.merchant+' — ' : '') + pendingAttachment.fileName
       };
       if(eff) mv.effective_date = eff;
@@ -625,6 +717,7 @@ function cancelAttachment(){
   pendingAttachment = null;
   document.getElementById('reviewCard').style.display = 'none';
   document.getElementById('reviewImputacion').style.display = 'none';
+  document.getElementById('reviewRecon').style.display = 'none';
   document.getElementById('reviewDueDate').value = '';
   document.getElementById('fileInput').value = '';
 }

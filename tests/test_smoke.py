@@ -126,12 +126,37 @@ def test_parser_consumos_bbva():
         "TOTAL CONSUMOS DE JUAN PEREZ",
     ])
     items = llm._extract_consumos_regex(texto)
+    # 4 líneas de consumo (incluye la devolución negativa de COTO)
     assert len(items) == 4
     coto = next(i for i in items if i["amount"] > 300000)
     assert coto["date"] == "2026-07-15"
-    assert coto["category"] == "Alimentos"
+    assert coto["category"] == "Alimentos" and coto["currency"] == "ARS"
     spot = next(i for i in items if "SPOTIFY" in i["merchant"].upper())
-    assert "(USD)" in spot["merchant"] and spot["category"] == "Suscripciones"
+    assert spot["currency"] == "USD" and spot["amount"] == 2.99
+    assert spot["category"] == "Suscripciones"
+    devol = next(i for i in items if i["amount"] < 0)
+    assert devol["amount"] == -2812.87
 
     assert llm._extract_due_date("VENCIMIENTO ACTUAL\n07-Ago-26\n") == "2026-08-07"
     assert llm._extract_due_date("VENCIMIENTO ANTERIOR\n06-Jul-26\nsin actual") == ""
+
+
+def test_reconciliation_extract():
+    from app import llm
+    raw = "\n".join([
+        "SALDO ANTERIOR", "1.378.364,63", "17,16",
+        "SU PAGO EN PESOS", "-1.378.364,63",
+        "SU PAGO EN USD", "-17,16",
+        "TOTAL CONSUMOS DE JUAN PEREZ", "1.746.990,20", "16,55",
+        "IIBB PERCEP-CABA 2,00%(   24758,80)", "495,17",
+        "IVA RG 4240 21%(   24758,80)", "5.199,34",
+        "DB.RG 5617  30% (    24758,80 )", "7.427,64",
+        "SALDO ACTUAL", "1.760.112,35", "16,55",
+        "Total de cuotas a vencer",
+    ])
+    r = llm._extract_reconciliation(raw)
+    assert r is not None
+    assert r["saldo_actual_ars"] == 1760112.35
+    assert round(r["cargos_total_ars"], 2) == 13122.15
+    assert len(r["cargos"]) == 3
+    assert r["consumos_resumen_ars"] == 1746990.20

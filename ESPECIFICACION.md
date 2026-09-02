@@ -9,6 +9,12 @@ en la reunión del 27/08/2026 (`tarea.md`) y las respuestas posteriores.
 > Cambio 01/09/2026 (b): los consumos de un **resumen de tarjeta** se imputan al
 > mes de la **fecha de vencimiento** (VENCIMIENTO ACTUAL), no al mes de cada
 > compra. Nuevo campo `movements.effective_date`. Ver secciones 3.1 y 4.
+>
+> Cambio 02/09/2026: **doble moneda** (`movements.currency` ARS/USD) con resumen
+> paralelo $ y US$; los consumos en dólares se cargan literales en USD; las
+> devoluciones se cargan negativas; y al subir un resumen se muestra un panel de
+> **reconciliación** con las percepciones/impuestos del resumen (que NO se cargan
+> como movimiento) para cuadrar contra el SALDO ACTUAL.
 
 ## 1. Objetivo
 
@@ -79,16 +85,23 @@ movements(
   id TEXT PK, type TEXT,
   date TEXT (YYYY-MM-DD),            -- fecha real de la compra / del movimiento
   effective_date TEXT (YYYY-MM-DD),  -- fecha con la que se imputa a un mes
-  category TEXT, amount REAL, note TEXT, created_at TEXT
+  category TEXT,
+  amount REAL,                       -- puede ser negativo (reintegro / devolución en un gasto)
+  currency TEXT DEFAULT 'ARS',       -- 'ARS' | 'USD'
+  note TEXT, created_at TEXT
 )
 config(key TEXT PK, value TEXT)   -- hoy: goalPct
 ```
 
-`effective_date` = `date` para casi todo. Para los consumos de un resumen de
-tarjeta es la **fecha de vencimiento** del resumen. Todos los agrupamientos por
-mes (recibo, gráficos, selector de mes) usan `effective_date`; la tabla de
-movimientos muestra `date`. Migración automática para bases previas
-(`_migrate()` en `app/db.py`, backfill `effective_date = date`).
+- `effective_date` = `date` para casi todo. Para los consumos de un resumen de
+  tarjeta es la **fecha de vencimiento** del resumen. Todos los agrupamientos por
+  mes (recibo, gráficos, selector de mes) usan `effective_date`; la tabla de
+  movimientos muestra `date`.
+- `currency`: los sumarios de pesos y de dólares se calculan por separado
+  (`sumBy(list, type, currency)` en el frontend). Los gráficos son solo ARS.
+- `amount` negativo: sólo para gastos (reintegro); un ingreso negativo es error.
+- Migración automática para bases previas (`_migrate()` en `app/db.py`, backfill
+  `effective_date = date`, `currency = 'ARS'`).
 
 ### 3.2 API HTTP
 
@@ -135,6 +148,8 @@ está configurada.
 | "Focalizar" el texto del resumen antes de mandarlo | El plan gratuito de Groq tiene un límite bajo de tokens por minuto (~8000, e incluye el `max_tokens` de salida). `_focus_statement()` deja sólo los bloques "Consumos … / TOTAL CONSUMOS DE …" (de ~13 KB a <1 KB). Si aún así no entra, `_split_statement()` lo parte por titular y hace varias llamadas. |
 | Parser determinístico de consumos (`_extract_consumos_regex`) | El formato BBVA Visa/Mastercard es regular (fecha / descripción / cupón / monto). Se extraen los consumos con regex + categorización por palabras clave (`_categorize`). Rápido, exacto, sin cuota, y **sin la inconsistencia del LLM** (que a veces devolvía 15 de 27 ítems). El modelo queda solo de fallback para PDFs que el regex no reconoce (otros bancos, tickets sueltos). |
 | Fecha de vencimiento: regex primero, LLM de respaldo | `_extract_due_date()` busca "VENCIMIENTO ACTUAL" en el texto crudo. Si falla, se le pasa al modelo un encabezado acotado y devuelve `due_date` en el JSON. Si ninguno la encuentra, el frontend la pide al usuario. |
+| Reconciliación (`_extract_reconciliation`) | Parsea el "resumen de cuenta" del PDF (SALDO ANTERIOR → SALDO ACTUAL): pagos, total de consumos, percepciones/impuestos, saldo. `_build_reconciliation_view()` compara lo que carga el panel (neto de devoluciones, por moneda) contra el total de consumos del resumen y muestra las percepciones aparte. Los cargos del resumen NO se cargan como movimientos (decisión del usuario). |
+| Detección de moneda del consumo | Sólo el token "USD" / "U$S" (a veces pegado al cupón: "…285USD"). NO se usa "DÓLAR/DOLARES" porque aparece en nombres de comercios ("DUTY FREE SHOP DOLARES") que se pagan en pesos. |
 | Deducir tipo de archivo por extensión | Algunos navegadores/Windows no informan el MIME al subir; el backend lo deduce de la extensión del nombre. |
 | `GROQ_VISION_MODEL` opcional | Si en el futuro se habilita un modelo con visión, basta setear la variable y las fotos JPG/PNG funcionan sin cambios de código. |
 | API key en el backend | El prototipo la exponía en el navegador. Riesgo de robo de clave y de cuota. |

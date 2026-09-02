@@ -247,7 +247,7 @@ def transcribe_audio(audio_bytes: bytes, mime_type: str) -> str:
 # --- 3. Comprobante -> items ------------------------------------
 
 _ATTACH_RULES = f"""Devolvé SOLO un objeto JSON válido (sin texto adicional, sin markdown, sin backticks):
-{{"doc_type":"ticket|resumen_tarjeta","card_brand":"Visa|Mastercard|Amex|","due_date":"YYYY-MM-DD|","items":[{{"date":"YYYY-MM-DD","merchant":"string","amount":number,"category":"string"}}]}}
+{{"doc_type":"ticket|resumen_tarjeta","card_brand":"Visa|Mastercard|Amex|","due_date":"YYYY-MM-DD|","items":[{{"date":"YYYY-MM-DD","merchant":"string","amount":number,"currency":"ARS|USD","category":"string"}}]}}
 
 Reglas:
 - doc_type "ticket": comprobante de una sola compra -> "items" tiene un único elemento con el total.
@@ -262,8 +262,10 @@ Reglas:
 - category: elegí UNA de {CATS_GASTO} según el comercio o rubro.
 - date: formato YYYY-MM-DD. El resumen usa formatos como "28-Jul-26" (= 2026-07-28).
   Si un consumo no tiene fecha propia, usá la fecha de cierre del resumen.
-- amount: número en pesos, sin separador de miles ni símbolos (ej: 220582.37).
-  Si el consumo está expresado en dólares (USD/U$S), dejá el número tal cual y agregá " (USD)" al final del merchant.
+- amount: número sin separador de miles ni símbolos (ej: 220582.37). Puede ser
+  negativo si es una devolución / reintegro (ej: -2812.87).
+- currency: "USD" si el consumo está expresado en dólares (marca "USD"/"U$S");
+  si no, "ARS". Dejá el número tal cual en su moneda, no lo conviertas.
 - merchant: nombre del comercio tal como figura, breve (2-4 palabras).
 """
 
@@ -286,14 +288,95 @@ def _extract_due_date(raw: str) -> str:
     return ""
 
 
-class _PdfContent:
-    __slots__ = ("llm_text", "consumos", "brand", "due_date")
+_RECON_AMOUNT = re.compile(r"^\s*(-?\$?\s?[\d.]{1,15},\d{2})\s*$")
 
-    def __init__(self, llm_text: str, consumos: str, brand: str, due_date: str):
+
+def _extract_reconciliation(raw: str) -> dict | None:
+    """Extrae el 'resumen de cuenta' de un resumen de tarjeta BBVA:
+    saldo anterior, pagos, total de consumos, percepciones/impuestos, saldo actual.
+    Sirve para reconciliar contra el resumen impreso; NO se carga como movimientos.
+    """
+    lines = raw.splitlines()
+    start = -1
+    for idx, ln in enumerate(lines):
+        if re.match(r"\s*SALDO ANTERIOR\b", ln, re.IGNORECASE):
+            start = idx
+            break
+    if start < 0:
+        return None
+    # el bloque termina en el PRIMER "SALDO ACTUAL" después de "SALDO ANTERIOR"
+    end = -1
+    for idx in range(start + 1, min(start + 60, len(lines))):
+        if re.match(r"\s*SALDO ACTUAL\b", lines[idx], re.IGNORECASE):
+            end = idx
+            break
+    if end < 0:
+        return None
+
+    block = lines[start:end + 3]
+    rows: list[dict] = []
+    i = 0
+    while i < len(block):
+        label = block[i].strip()
+        # una fila válida empieza con una etiqueta (tiene letras), no con un número
+        if not label or _RECON_AMOUNT.match(block[i]) or not re.search(r"[A-Za-zÁÉÍÓÚ]", label):
+            i += 1
+            continue
+        vals = []
+        j = i + 1
+        while j < len(block) and _RECON_AMOUNT.match(block[j]) and len(vals) < 2:
+            vals.append(_amount_to_float(_RECON_AMOUNT.match(block[j]).group(1)))
+            j += 1
+        if vals:
+            rows.append({
+                "label": re.sub(r"\s{2,}", " ", label)[:70],
+                "ars": round(vals[0], 2),
+                "usd": round(vals[1], 2) if len(vals) > 1 else 0.0,
+            })
+            i = j
+        else:
+            i += 1
+
+    if not rows:
+        return None
+
+    def _kind(lbl: str) -> str:
+        u = lbl.upper()
+        if u.startswith("SALDO ANTERIOR"):
+            return "saldo_anterior"
+        if u.startswith("SALDO ACTUAL"):
+            return "saldo_actual"
+        if u.startswith("SU PAGO") or "PAGO EN" in u:
+            return "pago"
+        if u.startswith("TOTAL CONSUMOS"):
+            return "consumo"
+        return "cargo"
+
+    cargos = [r for r in rows if _kind(r["label"]) == "cargo"]
+    saldo_actual = next((r for r in rows if _kind(r["label"]) == "saldo_actual"), None)
+    consumos_rows = [r for r in rows if _kind(r["label"]) == "consumo"]
+
+    return {
+        "rows": rows,
+        "cargos": cargos,
+        "cargos_total_ars": round(sum(r["ars"] for r in cargos), 2),
+        "cargos_total_usd": round(sum(r["usd"] for r in cargos), 2),
+        "consumos_resumen_ars": round(sum(r["ars"] for r in consumos_rows), 2),
+        "consumos_resumen_usd": round(sum(r["usd"] for r in consumos_rows), 2),
+        "saldo_actual_ars": saldo_actual["ars"] if saldo_actual else 0.0,
+        "saldo_actual_usd": saldo_actual["usd"] if saldo_actual else 0.0,
+    }
+
+
+class _PdfContent:
+    __slots__ = ("llm_text", "consumos", "brand", "due_date", "reconciliation")
+
+    def __init__(self, llm_text, consumos, brand, due_date, reconciliation=None):
         self.llm_text = llm_text      # texto a mandar al modelo (fallback)
         self.consumos = consumos      # solo los bloques de consumos (para el parser regex)
         self.brand = brand
         self.due_date = due_date
+        self.reconciliation = reconciliation  # dict o None
 
 
 def _pdf_text(file_bytes: bytes) -> "_PdfContent":
@@ -325,6 +408,7 @@ def _pdf_text(file_bytes: bytes) -> "_PdfContent":
         brand = "Amex"
 
     due_date = _extract_due_date(raw)
+    reconciliation = _extract_reconciliation(raw)
 
     noise = re.compile(
         r"^\s*(Sobre \(\d+\)|Banco BBVA Argentina|.*Página \d+ de \d+|"
@@ -348,7 +432,7 @@ def _pdf_text(file_bytes: bytes) -> "_PdfContent":
         if header:
             llm_text = "DATOS DEL RESUMEN:\n" + "\n".join(header) + "\n\nCONSUMOS:\n" + consumos
 
-    return _PdfContent(llm_text, consumos, brand, due_date)
+    return _PdfContent(llm_text, consumos, brand, due_date, reconciliation)
 
 
 def _focus_statement(text: str) -> str:
@@ -480,17 +564,21 @@ def _extract_consumos_regex(consumos_text: str) -> list[dict]:
                 continue
             break
         if desc and amounts:
-            is_usd = bool(re.search(r"\b(USD|U\$S)\b", desc, re.IGNORECASE))
+            # El resumen marca los consumos en dólares con el token "USD" (o "U$S"),
+            # que a veces viene pegado al número de cupón ("661110285USD"), por eso
+            # no uso \b a la izquierda. NO uso "DOLAR/DOLARES" porque aparece en
+            # nombres de comercios ("DUTY FREE SHOP DOLARES") que se pagan en pesos.
+            is_usd = bool(re.search(r"(?:^|[\d\s])(USD|U\$S)(?:\s|$)", desc, re.IGNORECASE))
             value = _amount_to_float(amounts[0])
             merchant = _clean_merchant(desc)
-            if is_usd and "(USD)" not in merchant:
-                merchant = (merchant + " (USD)").strip()
-            items.append({
-                "date": date or _today(),
-                "merchant": merchant,
-                "amount": value,
-                "category": _categorize(merchant),
-            })
+            if value != 0:
+                items.append({
+                    "date": date or _today(),
+                    "merchant": merchant,
+                    "amount": value,                         # puede ser negativo (reintegro)
+                    "currency": "USD" if is_usd else "ARS",
+                    "category": _categorize(merchant),
+                })
         i = max(j, i + 1)
     return items
 
@@ -524,7 +612,12 @@ def _image_data_url(file_bytes: bytes, mime_type: str) -> str:
     raise LLMError("La imagen es demasiado grande incluso después de comprimirla.")
 
 
-def _normalize_result(parsed: dict) -> dict:
+def _normalize_result(parsed: dict, *, dedup: bool = True, keep_negative: bool = False) -> dict:
+    """Normaliza el resultado de un comprobante.
+
+    dedup=True         -> descarta ítems repetidos (defensivo contra el LLM).
+    keep_negative=True  -> conserva montos negativos (reintegros/devoluciones).
+    """
     today = _today()
     raw_items = parsed.get("items") or []
     norm, seen = [], set()
@@ -533,18 +626,23 @@ def _normalize_result(parsed: dict) -> dict:
             amount = float(it.get("amount") or 0)
         except (TypeError, ValueError):
             amount = 0.0
-        if amount <= 0:
+        if amount == 0 or (amount < 0 and not keep_negative):
             continue
         merchant = (it.get("merchant") or "").strip()
         d = _normalize_date(it.get("date")) or today
-        key = (d, merchant.lower(), round(amount, 2))
-        if key in seen:
-            continue
-        seen.add(key)
+        cur = (it.get("currency") or "ARS").upper()
+        if cur not in ("ARS", "USD"):
+            cur = "ARS"
+        if dedup:
+            key = (d, merchant.lower(), round(amount, 2), cur)
+            if key in seen:
+                continue
+            seen.add(key)
         norm.append({
             "date": d,
             "merchant": merchant,
             "amount": round(amount, 2),
+            "currency": cur,
             "category": (it.get("category") or "Otros").strip() or "Otros",
         })
     if not norm:
@@ -644,6 +742,41 @@ def _parse_statement_text(text: str, brand_hint: str = "", due_date_hint: str = 
     return result
 
 
+def _build_reconciliation_view(items: list[dict], stmt: dict | None) -> dict:
+    """Arma el resumen de reconciliación que ve el usuario al subir un resumen."""
+    def _s(cur, positive):
+        return round(sum(
+            it["amount"] for it in items
+            if it.get("currency", "ARS") == cur and (it["amount"] > 0) == positive
+        ), 2)
+
+    app_view = {
+        "consumos_ars": _s("ARS", True),
+        "consumos_usd": _s("USD", True),
+        "devoluciones_ars": _s("ARS", False),   # negativo o 0
+        "devoluciones_usd": _s("USD", False),
+        "n_items": len(items),
+    }
+    app_view["neto_ars"] = round(app_view["consumos_ars"] + app_view["devoluciones_ars"], 2)
+    app_view["neto_usd"] = round(app_view["consumos_usd"] + app_view["devoluciones_usd"], 2)
+
+    view = {"app": app_view, "statement": stmt}
+    if stmt:
+        exp_ars = stmt.get("consumos_resumen_ars", 0.0)
+        exp_usd = stmt.get("consumos_resumen_usd", 0.0)
+        view["check"] = {
+            "expected_ars": exp_ars,
+            "expected_usd": exp_usd,
+            "ok_ars": abs(app_view["neto_ars"] - exp_ars) <= 1.0,
+            "ok_usd": abs(app_view["neto_usd"] - exp_usd) <= 0.5,
+            "saldo_actual_ars": stmt.get("saldo_actual_ars", 0.0),
+            "saldo_actual_usd": stmt.get("saldo_actual_usd", 0.0),
+            "cargos_total_ars": stmt.get("cargos_total_ars", 0.0),
+            "cargos_total_usd": stmt.get("cargos_total_usd", 0.0),
+        }
+    return view
+
+
 def parse_attachment(file_bytes: bytes, mime_type: str) -> dict:
     if not file_bytes:
         raise LLMError("El archivo está vacío.")
@@ -661,13 +794,17 @@ def parse_attachment(file_bytes: bytes, mime_type: str) -> dict:
                 "due_date": pdf.due_date,
                 "items": regex_items,
             }
+            result = _normalize_result(parsed, dedup=False, keep_negative=True)
         else:
             # 2) Fallback: el modelo (otros bancos / tickets sueltos).
             parsed = _parse_statement_text(pdf.llm_text, pdf.brand, pdf.due_date)
+            is_resumen = (parsed.get("doc_type") == "resumen_tarjeta")
+            result = _normalize_result(parsed, dedup=not is_resumen, keep_negative=is_resumen)
 
-        result = _normalize_result(parsed)
         if result.get("doc_type") != "resumen_tarjeta":
             result["due_date"] = ""  # un ticket suelto no se imputa por vencimiento
+        else:
+            result["reconciliation"] = _build_reconciliation_view(result["items"], pdf.reconciliation)
         return result
 
     # Imagen: sólo si hay un modelo con visión configurado

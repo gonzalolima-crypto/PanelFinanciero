@@ -31,12 +31,23 @@
         <span>Resumen del mes</span>
         <select id="monthSelect"></select>
       </div>
+      <div class="cur-head">En pesos ($)</div>
       <div class="rline"><span class="lbl">Ingreso sueldo</span><span class="dots"></span><span class="val inc" id="sIngresoSueldo">$ 0</span></div>
       <div class="rline"><span class="lbl">Ingreso extra</span><span class="dots"></span><span class="val inc" id="sIngresoExtra">$ 0</span></div>
       <div class="rline"><span class="lbl">Gastos diarios</span><span class="dots"></span><span class="val neg" id="sGastoDiario">$ 0</span></div>
       <div class="rline"><span class="lbl">Gastos con tarjeta</span><span class="dots"></span><span class="val neg" id="sGastoTarjeta">$ 0</span></div>
       <div class="rline"><span class="lbl">Impuestos pagados</span><span class="dots"></span><span class="val tax" id="sImpuestos">$ 0</span></div>
       <div class="rline total"><span class="lbl">Ahorro del mes</span><span class="dots"></span><span class="val pos" id="sAhorro">$ 0</span></div>
+
+      <div id="usdBlock">
+        <div class="cur-head usd">En dólares (US$)</div>
+        <div class="rline"><span class="lbl">Ingresos</span><span class="dots"></span><span class="val inc" id="uIngresos">US$ 0,00</span></div>
+        <div class="rline"><span class="lbl">Gastos diarios</span><span class="dots"></span><span class="val neg" id="uGastoDiario">US$ 0,00</span></div>
+        <div class="rline"><span class="lbl">Gastos con tarjeta</span><span class="dots"></span><span class="val neg" id="uGastoTarjeta">US$ 0,00</span></div>
+        <div class="rline"><span class="lbl">Impuestos pagados</span><span class="dots"></span><span class="val tax" id="uImpuestos">US$ 0,00</span></div>
+        <div class="rline total"><span class="lbl">Ahorro del mes</span><span class="dots"></span><span class="val pos" id="uAhorro">US$ 0,00</span></div>
+      </div>
+
       <div class="goal-row">
         <div class="goal-caption">
           <span>Objetivo de ahorro: <strong id="goalPctLabel">20%</strong> del ingreso · <input id="goalPctInput" type="number" min="0" max="100" value="20" style="width:50px;background:var(--surface-2);border:1px solid var(--line);color:var(--ink);border-radius:5px;padding:1px 5px;font-family:'JetBrains Mono',monospace;font-size:11px;"> %</span>
@@ -91,6 +102,9 @@
       </div>
     </div>
     <div id="reviewGroups"></div>
+
+    <div class="recon" id="reviewRecon" style="display:none;"></div>
+
     <div class="review-total">
       <span class="lbl" style="font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--ink-dim);">Total a cargar: <span class="rt-val" id="reviewTotal">$ 0</span></span>
       <div class="review-actions">
@@ -122,8 +136,15 @@
         <select id="fCat"></select>
       </div>
       <div class="field">
-        <label>Monto (ARS)</label>
-        <input type="number" id="fAmount" placeholder="0" min="0" step="1">
+        <label>Monto</label>
+        <input type="number" id="fAmount" placeholder="0" step="0.01">
+      </div>
+      <div class="field">
+        <label>Moneda</label>
+        <select id="fCurrency">
+          <option value="ARS">$ ARS</option>
+          <option value="USD">US$ USD</option>
+        </select>
       </div>
       <div class="field">
         <label>Nota (opcional)</label>

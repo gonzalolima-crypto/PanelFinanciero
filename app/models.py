@@ -16,6 +16,7 @@ VALID_TYPES = {
     "ingreso_sueldo",
     "ingreso_extra",
 }
+VALID_CURRENCIES = {"ARS", "USD"}
 
 
 def _new_id() -> str:
@@ -24,7 +25,7 @@ def _new_id() -> str:
 
 def list_movements() -> list[dict]:
     rows = get_db().execute(
-        "SELECT id, type, date, effective_date, category, amount, note "
+        "SELECT id, type, date, effective_date, category, amount, currency, note "
         "FROM movements ORDER BY date DESC, created_at DESC"
     ).fetchall()
     return [dict(r) for r in rows]
@@ -38,15 +39,25 @@ def add_movement(
     category: Optional[str] = "",
     note: Optional[str] = "",
     effective_date: Optional[str] = None,
+    currency: Optional[str] = "ARS",
 ) -> dict:
     if type not in VALID_TYPES:
         raise ValueError(f"tipo inválido: {type}")
+
+    currency = (currency or "ARS").upper()
+    if currency not in VALID_CURRENCIES:
+        raise ValueError(f"moneda inválida: {currency}")
+
     try:
         amount = round(float(amount), 2)
     except (TypeError, ValueError):
         raise ValueError("monto inválido")
-    if amount <= 0:
-        raise ValueError("el monto debe ser mayor a cero")
+    if amount == 0:
+        raise ValueError("el monto no puede ser cero")
+    # Los gastos pueden ser negativos (reintegro / devolución). Los ingresos no.
+    if amount < 0 and type.startswith("ingreso"):
+        raise ValueError("un ingreso no puede ser negativo")
+
     if not date or not _DATE_RE.match(date):
         raise ValueError("fecha inválida (se espera YYYY-MM-DD)")
 
@@ -61,12 +72,13 @@ def add_movement(
         "effective_date": eff,
         "category": (category or "").strip(),
         "amount": amount,
+        "currency": currency,
         "note": (note or "").strip(),
     }
     db = get_db()
     db.execute(
-        "INSERT INTO movements(id, type, date, effective_date, category, amount, note, created_at) "
-        "VALUES (:id, :type, :date, :effective_date, :category, :amount, :note, :created_at)",
+        "INSERT INTO movements(id, type, date, effective_date, category, amount, currency, note, created_at) "
+        "VALUES (:id, :type, :date, :effective_date, :category, :amount, :currency, :note, :created_at)",
         {**mv, "created_at": datetime.now(timezone.utc).isoformat()},
     )
     db.commit()
