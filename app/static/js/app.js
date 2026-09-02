@@ -2,9 +2,16 @@
    Habla con el backend Flask por /api/*. La interpretación de voz y de
    comprobantes la hace Groq del lado del servidor. */
 
+// Categorías de gasto (mismas para "gasto diario" y "gasto con tarjeta").
+// Primero las categorías propias del usuario, después las genéricas, "Otros" al final.
+const CATS_GASTO = [
+  "Compra de Super","Colegio","Gastos Delfi","Gastos Lu","Delivery","Gastos Autos",
+  "Gastos Viajes","Regalos","Ropa","Gastos Padres",
+  "Alimentos","Transporte","Salud","Ocio","Servicios","Hogar","Suscripciones","Otros"
+];
 const CATS = {
-  gasto_diario: ["Alimentos","Transporte","Salud","Ocio","Servicios","Hogar","Otros"],
-  gasto_tarjeta: ["Alimentos","Transporte","Salud","Ocio","Servicios","Hogar","Suscripciones","Otros"],
+  gasto_diario: CATS_GASTO,
+  gasto_tarjeta: CATS_GASTO,
   impuesto: ["Ganancias","IIBB","Monotributo","ABL/Municipal","Patente","Otros"],
   ingreso_sueldo: [],
   ingreso_extra: ["Freelance","Venta","Bono","Regalo","Otros"]
@@ -508,24 +515,21 @@ async function handleFileSelected(file){
     fd.append('file', file, file.name);
     const parsed = await api('/api/attachment/parse', { method:'POST', body: fd });
 
-    const groups = {};
-    (parsed.items||[]).forEach(it=>{
-      const cat = it.category && it.category.trim() ? it.category.trim() : 'Otros';
-      if(!groups[cat]) groups[cat] = { items:[], included:true };
-      groups[cat].items.push({
-        date: it.date,
-        merchant: it.merchant || '',
-        amount: Number(it.amount)||0,
-        currency: (it.currency === 'USD') ? 'USD' : 'ARS'
-      });
-    });
+    const items = (parsed.items||[]).map(it=>({
+      date: it.date,
+      merchant: it.merchant || '',
+      amount: Number(it.amount)||0,
+      currency: (it.currency === 'USD') ? 'USD' : 'ARS',
+      category: (it.category && it.category.trim()) ? it.category.trim() : 'Otros',
+      included: true
+    }));
     pendingAttachment = {
       fileName: parsed.fileName || file.name,
       cardBrand: parsed.card_brand || '',
       docType: parsed.doc_type || 'ticket',
       dueDate: parsed.due_date || '',          // fecha de vencimiento detectada (o '')
       recon: parsed.reconciliation || null,
-      groups
+      items
     };
     renderAttachmentReview();
     document.getElementById('attachStatus').textContent = 'PDF de resumen de tarjeta (Visa / Mastercard) o de ticket';
@@ -562,6 +566,21 @@ function renderImputacion(){
   };
 }
 
+const money = (ars, usd) => {
+  const parts = [];
+  if(ars || !usd) parts.push(fmt(ars));
+  if(usd) parts.push(fmtUsd(usd));
+  return parts.join('  +  ');
+};
+
+function groupedAttachmentItems(){
+  // agrupa los ítems por categoría, respetando el orden de CATS_GASTO
+  const byCat = {};
+  pendingAttachment.items.forEach((it, idx)=>{ (byCat[it.category] = byCat[it.category] || []).push(idx); });
+  const order = CATS_GASTO.filter(c => byCat[c]).concat(Object.keys(byCat).filter(c => !CATS_GASTO.includes(c)));
+  return order.map(cat => ({ cat, idxs: byCat[cat] }));
+}
+
 function renderAttachmentReview(){
   if(!pendingAttachment) return;
   const card = document.getElementById('reviewCard');
@@ -570,56 +589,64 @@ function renderAttachmentReview(){
   document.getElementById('reviewBrand').textContent = pendingAttachment.cardBrand
     ? pendingAttachment.cardBrand.toUpperCase() + ' detectada'
     : (pendingAttachment.docType==='ticket' ? 'Ticket' : 'Resumen');
-  const totalItems = Object.values(pendingAttachment.groups).reduce((a,g)=>a+g.items.length,0);
-  document.getElementById('reviewCount').textContent = totalItems + (totalItems===1 ? ' consumo' : ' consumos');
+  const items = pendingAttachment.items;
+  document.getElementById('reviewCount').textContent = items.length + (items.length===1 ? ' consumo' : ' consumos');
 
   renderImputacion();
 
-  const sumCur = (items, cur) => items.filter(i=>i.currency===cur).reduce((a,i)=>a+i.amount,0);
-  const money = (ars, usd) => {
-    const parts = [];
-    if(ars || !usd) parts.push(fmt(ars));
-    if(usd) parts.push(fmtUsd(usd));
-    return parts.join('  +  ');
-  };
+  const catOptions = c => CATS_GASTO.map(o=>`<option${o===c?' selected':''}>${o}</option>`).join('');
+  const sumIdxs = (idxs, cur) => idxs.filter(i=>items[i].currency===cur).reduce((a,i)=>a+items[i].amount,0);
 
   const wrap = document.getElementById('reviewGroups');
-  wrap.innerHTML = Object.entries(pendingAttachment.groups).map(([cat,g], idx)=>{
-    const ars = sumCur(g.items,'ARS'), usd = sumCur(g.items,'USD');
-    const itemsHtml = g.items.map(i=>{
-      const neg = i.amount < 0;
-      return `<div class="item-row"><span>${i.date} · ${escapeHtml(i.merchant||'—')}${neg?' · reintegro':''}</span>`
-        + `<span${neg?' style="color:var(--green)"':''}>${(neg?'+ ':'')}${fmtCur(Math.abs(i.amount), i.currency)}</span></div>`;
+  wrap.innerHTML = groupedAttachmentItems().map(({cat, idxs}, gi)=>{
+    const allInc = idxs.every(i=>items[i].included);
+    const someInc = idxs.some(i=>items[i].included);
+    const ars = sumIdxs(idxs,'ARS'), usd = sumIdxs(idxs,'USD');
+    const rows = idxs.map(i=>{
+      const it = items[i], neg = it.amount < 0;
+      return `<div class="item-row" data-i="${i}">
+        <label class="ir-left"><input type="checkbox" data-inc="${i}" ${it.included?'checked':''}>
+          <span>${it.date} · ${escapeHtml(it.merchant||'—')}${neg?' · reintegro':''}</span></label>
+        <span class="ir-right">
+          <select data-cat="${i}">${catOptions(it.category)}</select>
+          <span${neg?' style="color:var(--green)"':''}>${(neg?'+ ':'')}${fmtCur(Math.abs(it.amount), it.currency)}</span>
+        </span>
+      </div>`;
     }).join('');
-    return `<div class="group ${g.included?'':'excluded'}" data-cat="${escapeHtml(cat)}">
+    return `<div class="group ${allInc?'':(someInc?'partial':'excluded')}">
       <div class="group-row">
         <div class="group-left">
-          <input type="checkbox" ${g.included?'checked':''} data-toggle="${escapeHtml(cat)}">
+          <input type="checkbox" data-gtoggle="${gi}" ${allInc?'checked':''}>
           <span class="group-name">${escapeHtml(cat)}</span>
-          <span class="group-count">${g.items.length} ${g.items.length===1?'consumo':'consumos'}</span>
+          <span class="group-count">${idxs.length} ${idxs.length===1?'consumo':'consumos'}</span>
         </div>
-        <span class="group-sum" data-expand="${idx}">${money(ars, usd)}</span>
+        <span class="group-sum" data-expand="${gi}">${money(ars, usd)}</span>
       </div>
-      <div class="group-items" id="items-${idx}">${itemsHtml}</div>
+      <div class="group-items" id="items-${gi}">${rows}</div>
     </div>`;
   }).join('');
 
-  Array.from(wrap.querySelectorAll('input[data-toggle]')).forEach(cb=>{
+  const groups = groupedAttachmentItems();
+  wrap.querySelectorAll('input[data-gtoggle]').forEach(cb=>{
     cb.addEventListener('change', ()=>{
-      pendingAttachment.groups[cb.getAttribute('data-toggle')].included = cb.checked;
+      groups[+cb.getAttribute('data-gtoggle')].idxs.forEach(i=> items[i].included = cb.checked);
       renderAttachmentReview();
     });
   });
-  Array.from(wrap.querySelectorAll('[data-expand]')).forEach(el=>{
+  wrap.querySelectorAll('input[data-inc]').forEach(cb=>{
+    cb.addEventListener('change', ()=>{ items[+cb.getAttribute('data-inc')].included = cb.checked; renderAttachmentReview(); });
+  });
+  wrap.querySelectorAll('select[data-cat]').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ items[+sel.getAttribute('data-cat')].category = sel.value; renderAttachmentReview(); });
+  });
+  wrap.querySelectorAll('[data-expand]').forEach(el=>{
     el.style.cursor = 'pointer';
-    el.addEventListener('click', ()=>{
-      document.getElementById('items-'+el.getAttribute('data-expand')).classList.toggle('show');
-    });
+    el.addEventListener('click', ()=> document.getElementById('items-'+el.getAttribute('data-expand')).classList.toggle('show'));
   });
 
-  const inc = Object.values(pendingAttachment.groups).filter(g=>g.included);
-  const totArs = inc.reduce((a,g)=>a+sumCur(g.items,'ARS'),0);
-  const totUsd = inc.reduce((a,g)=>a+sumCur(g.items,'USD'),0);
+  const inc = items.filter(i=>i.included);
+  const totArs = inc.filter(i=>i.currency==='ARS').reduce((a,i)=>a+i.amount,0);
+  const totUsd = inc.filter(i=>i.currency==='USD').reduce((a,i)=>a+i.amount,0);
   document.getElementById('reviewTotal').textContent = money(totArs, totUsd);
 
   renderRecon();
@@ -628,43 +655,43 @@ function renderAttachmentReview(){
 function renderRecon(){
   const el = document.getElementById('reviewRecon');
   const r = pendingAttachment && pendingAttachment.recon;
-  if(!r){ el.style.display = 'none'; return; }
+  if(!r || !r.statement){ el.style.display = 'none'; return; }
   el.style.display = 'block';
-  const a = r.app, st = r.statement, c = r.check;
+  const st = r.statement, c = r.check || {};
+  const inc = pendingAttachment.items.filter(i=>i.included);
+  const pos = (arr, cur) => arr.filter(i=>i.currency===cur && i.amount>0).reduce((a,i)=>a+i.amount,0);
+  const negs = (arr, cur) => arr.filter(i=>i.currency===cur && i.amount<0).reduce((a,i)=>a+i.amount,0);
+  const consArs = pos(inc,'ARS'), consUsd = pos(inc,'USD');
+  const devArs = negs(inc,'ARS'), devUsd = negs(inc,'USD');
+  const netoArs = consArs + devArs, netoUsd = consUsd + devUsd;
+  const expArs = c.expected_ars || 0, expUsd = c.expected_usd || 0;
+  const okArs = Math.abs(netoArs - expArs) <= 1.0, okUsd = Math.abs(netoUsd - expUsd) <= 0.5;
+
   const rr = (label, val, cls='') => `<div class="rr ${cls}"><span>${label}</span><span class="v">${val}</span></div>`;
-
   let html = '<h4>Reconciliación con tu resumen</h4>';
-  html += rr('Consumos en pesos', fmt(a.consumos_ars));
-  if(a.consumos_usd) html += rr('Consumos en dólares', fmtUsd(a.consumos_usd));
-  if(a.devoluciones_ars) html += rr('Devoluciones / reintegros', '<span class="neg">'+fmt(a.devoluciones_ars)+'</span>');
-  if(a.devoluciones_usd) html += rr('Devoluciones en dólares', '<span class="neg">'+fmtUsd(a.devoluciones_usd)+'</span>');
-  html += rr('Se carga al panel', money2(a.neto_ars, a.neto_usd), 'tot');
+  html += rr('Consumos en pesos', fmt(consArs));
+  if(consUsd) html += rr('Consumos en dólares', fmtUsd(consUsd));
+  if(devArs) html += rr('Devoluciones / reintegros', '<span class="neg">'+fmt(devArs)+'</span>');
+  if(devUsd) html += rr('Devoluciones en dólares', '<span class="neg">'+fmtUsd(devUsd)+'</span>');
+  html += rr('Se carga al panel', money(netoArs, netoUsd), 'tot');
 
-  if(st && st.cargos && st.cargos.length){
+  if(st.cargos && st.cargos.length){
     html += '<div class="note">Cargos del resumen (NO se cargan al panel — solo para que cuadres):</div>';
     st.cargos.forEach(row=>{
-      html += rr(row.label, row.usd ? (fmt(row.ars)+'  '+fmtUsd(row.usd)) : fmt(row.ars), 'sub');
+      html += rr(escapeHtml(row.label), row.usd ? (fmt(row.ars)+'  '+fmtUsd(row.usd)) : fmt(row.ars), 'sub');
     });
-    html += rr('Subtotal cargos', money2(c.cargos_total_ars, c.cargos_total_usd), 'sub');
+    html += rr('Subtotal cargos', money(c.cargos_total_ars||0, c.cargos_total_usd||0), 'sub');
   }
-  if(c){
-    html += rr('SALDO ACTUAL del resumen', money2(c.saldo_actual_ars, c.saldo_actual_usd), 'saldo');
-    const ok = c.ok_ars && c.ok_usd;
-    html += `<div class="chk ${ok?'ok':'bad'}">`
-      + (ok
-         ? '✓ Los consumos cargados coinciden con el total de consumos del resumen.'
-         : 'Los consumos cargados no coinciden exactamente con el resumen (esperado: '
-           + money2(c.expected_ars, c.expected_usd) + '). Revisá los ítems.')
-      + '</div>';
-  }
+  html += rr('SALDO ACTUAL del resumen', money(c.saldo_actual_ars||0, c.saldo_actual_usd||0), 'saldo');
+  const ok = okArs && okUsd;
+  html += `<div class="chk ${ok?'ok':'bad'}">`
+    + (ok
+       ? '✓ Los consumos cargados coinciden con el total de consumos del resumen.'
+       : 'Los consumos cargados no coinciden con el total del resumen (esperado: '
+         + money(expArs, expUsd) + '). Puede ser que hayas destildado algún ítem.')
+    + '</div>';
   el.innerHTML = html;
 }
-function money2(ars, usd){
-  const p = [fmt(ars)];
-  if(usd) p.push(fmtUsd(usd));
-  return p.join('  +  ');
-}
-
 async function confirmAttachment(){
   if(!pendingAttachment) return;
   const isResumen = pendingAttachment.docType === 'resumen_tarjeta';
@@ -681,21 +708,17 @@ async function confirmAttachment(){
     }
   }
 
-  const payload = [];
-  Object.entries(pendingAttachment.groups).forEach(([cat,g])=>{
-    if(!g.included) return;
-    g.items.forEach(it=>{
-      const mv = {
-        type,
-        date: it.date,
-        category: cat,
-        amount: it.amount,
-        currency: it.currency || 'ARS',
-        note: (it.merchant ? it.merchant+' — ' : '') + pendingAttachment.fileName
-      };
-      if(eff) mv.effective_date = eff;
-      payload.push(mv);
-    });
+  const payload = pendingAttachment.items.filter(it=>it.included).map(it=>{
+    const mv = {
+      type,
+      date: it.date,
+      category: it.category,
+      amount: it.amount,
+      currency: it.currency || 'ARS',
+      note: (it.merchant ? it.merchant+' — ' : '') + pendingAttachment.fileName
+    };
+    if(eff) mv.effective_date = eff;
+    return mv;
   });
   if(!payload.length){ cancelAttachment(); return; }
   try{

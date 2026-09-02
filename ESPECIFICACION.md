@@ -10,11 +10,18 @@ en la reunión del 27/08/2026 (`tarea.md`) y las respuestas posteriores.
 > mes de la **fecha de vencimiento** (VENCIMIENTO ACTUAL), no al mes de cada
 > compra. Nuevo campo `movements.effective_date`. Ver secciones 3.1 y 4.
 >
-> Cambio 02/09/2026: **doble moneda** (`movements.currency` ARS/USD) con resumen
-> paralelo $ y US$; los consumos en dólares se cargan literales en USD; las
-> devoluciones se cargan negativas; y al subir un resumen se muestra un panel de
-> **reconciliación** con las percepciones/impuestos del resumen (que NO se cargan
-> como movimiento) para cuadrar contra el SALDO ACTUAL.
+> Cambio 02/09/2026 (a): **doble moneda** (`movements.currency` ARS/USD) con
+> resumen paralelo $ y US$; los consumos en dólares se cargan literales en USD;
+> las devoluciones se cargan negativas; y al subir un resumen se muestra un panel
+> de **reconciliación** con las percepciones/impuestos del resumen (que NO se
+> cargan como movimiento) para cuadrar contra el SALDO ACTUAL.
+>
+> Cambio 02/09/2026 (b): categorías de gasto propias del usuario (Compra de
+> Super, Colegio, Gastos Delfi/Lu/Padres, Delivery, Gastos Autos/Viajes, Regalos,
+> Ropa) sumadas a las genéricas. Auto-clasificación por comercio actualizada
+> (`_CAT_KEYWORDS`). En la pantalla de revisión, **editar la categoría de cada
+> consumo** (`renderAttachmentReview` ahora trabaja sobre una lista plana de
+> ítems `{...,category,included}` y agrupa al vuelo).
 
 ## 1. Objetivo
 

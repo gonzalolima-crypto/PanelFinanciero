@@ -130,7 +130,7 @@ def test_parser_consumos_bbva():
     assert len(items) == 4
     coto = next(i for i in items if i["amount"] > 300000)
     assert coto["date"] == "2026-07-15"
-    assert coto["category"] == "Alimentos" and coto["currency"] == "ARS"
+    assert coto["category"] == "Compra de Super" and coto["currency"] == "ARS"
     spot = next(i for i in items if "SPOTIFY" in i["merchant"].upper())
     assert spot["currency"] == "USD" and spot["amount"] == 2.99
     assert spot["category"] == "Suscripciones"

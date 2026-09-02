@@ -172,12 +172,21 @@ publiques la app. Para hacer una copia de seguridad, copiá `data/panel.db`.
 Si querés que los haga yo, alcanza con que me digas qué querés. Abajo, dónde
 vive cada cosa por si querés tocarlo.
 
-### Cambiar las categorías
+### Categorías de gasto
 
-Están **en dos lugares que tienen que coincidir**:
+Las categorías para **gasto diario** y **gasto con tarjeta** son (en este orden):
+Compra de Super, Colegio, Gastos Delfi, Gastos Lu, Delivery, Gastos Autos,
+Gastos Viajes, Regalos, Ropa, Gastos Padres, Alimentos, Transporte, Salud, Ocio,
+Servicios, Hogar, Suscripciones, Otros.
 
-- Backend: `app/llm.py`, arriba de todo (`CATS_GASTO`, `CATS_IMPUESTO`, `CATS_INGRESO_EXTRA`).
-- Frontend: `app/static/js/app.js`, la constante `CATS` al principio.
+- Al **importar un resumen**, la app trata de adivinar la categoría por el nombre
+  del comercio (COTO → Compra de Super, YPF/peajes → Gastos Autos, Netflix →
+  Suscripciones, etc.). Lo que no reconoce cae en "Otros".
+- En la pantalla de revisión, **cada consumo tiene un desplegable** para cambiarle
+  la categoría antes de cargar (tocá el monto del grupo para expandirlo).
+- Para **agregar/quitar/renombrar** categorías: `app/static/js/app.js` (constante
+  `CATS_GASTO`, arriba) y `app/llm.py` (constante `CATS_GASTO` y, si querés que
+  la app las adivine sola, el mapa `_CAT_KEYWORDS`). Pedímelo y lo hago.
 
 ### Cambiar el objetivo de ahorro por defecto (hoy 20%)
 
