@@ -141,6 +141,27 @@ def test_parser_consumos_bbva():
     assert llm._extract_due_date("VENCIMIENTO ANTERIOR\n06-Jul-26\nsin actual") == ""
 
 
+def test_traduccion_sql_postgres(monkeypatch):
+    """Con DATABASE_URL de Postgres, las consultas :nombre se traducen a %(nombre)s."""
+    import importlib
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@host/db")
+    from app import config as cfg
+    importlib.reload(cfg)
+    from app import db as dbmod
+    importlib.reload(dbmod)
+    try:
+        assert dbmod.IS_PG is True
+        assert dbmod._AMOUNT_TYPE == "DOUBLE PRECISION"
+        assert dbmod._adapt("DELETE FROM m WHERE id = :id") == "DELETE FROM m WHERE id = %(id)s"
+        # los casts :: de postgres no se rompen
+        assert dbmod._adapt("SELECT a::text WHERE x = :x") == "SELECT a::text WHERE x = %(x)s"
+    finally:
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        importlib.reload(cfg)
+        importlib.reload(dbmod)
+    assert dbmod.IS_PG is False
+
+
 def test_reconciliation_extract():
     from app import llm
     raw = "\n".join([

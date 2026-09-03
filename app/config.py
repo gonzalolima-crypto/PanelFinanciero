@@ -1,7 +1,7 @@
 """Configuración central de la aplicación.
 
 Todos los valores se leen de variables de entorno (archivo .env en local,
-secrets de Fly.io en producción). Nunca escribas claves reales acá.
+variables de entorno del hosting en producción). Nunca escribas claves reales acá.
 """
 import os
 from pathlib import Path
@@ -21,6 +21,11 @@ def _as_int(name: str, default: int) -> int:
     except ValueError:
         return default
 
+
+# --- Base de datos ---------------------------------------------------------
+# Si DATABASE_URL apunta a un Postgres (producción: Neon/Render/etc.) se usa ese
+# motor. Si está vacía, se usa el archivo SQLite local (uso en tu computadora).
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 
 # --- Rutas de datos ---------------------------------------------------------
 DATA_DIR = Path(os.environ.get("DATA_DIR", str(BASE_DIR / "data")))

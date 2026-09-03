@@ -21,5 +21,6 @@ RUN mkdir -p /data
 
 EXPOSE 8080
 
-# 2 workers alcanza de sobra para uso personal
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "2", "--timeout", "120", "wsgi:app"]
+# 2 workers alcanza de sobra para uso personal.
+# Forma "shell" para que respete la variable PORT que inyecta el hosting.
+CMD gunicorn --bind "0.0.0.0:${PORT:-8080}" --workers 2 --timeout 120 wsgi:app

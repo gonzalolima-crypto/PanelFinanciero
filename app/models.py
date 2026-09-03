@@ -4,7 +4,7 @@ import re
 import secrets
 from typing import Optional
 
-from .db import get_db
+from . import db
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -24,11 +24,10 @@ def _new_id() -> str:
 
 
 def list_movements() -> list[dict]:
-    rows = get_db().execute(
+    return db.fetchall(
         "SELECT id, type, date, effective_date, category, amount, currency, note "
         "FROM movements ORDER BY date DESC, created_at DESC"
-    ).fetchall()
-    return [dict(r) for r in rows]
+    )
 
 
 def add_movement(
@@ -75,25 +74,20 @@ def add_movement(
         "currency": currency,
         "note": (note or "").strip(),
     }
-    db = get_db()
     db.execute(
         "INSERT INTO movements(id, type, date, effective_date, category, amount, currency, note, created_at) "
         "VALUES (:id, :type, :date, :effective_date, :category, :amount, :currency, :note, :created_at)",
         {**mv, "created_at": datetime.now(timezone.utc).isoformat()},
     )
-    db.commit()
     return mv
 
 
 def delete_movement(movement_id: str) -> bool:
-    db = get_db()
-    cur = db.execute("DELETE FROM movements WHERE id = ?", (movement_id,))
-    db.commit()
-    return cur.rowcount > 0
+    return db.execute("DELETE FROM movements WHERE id = :id", {"id": movement_id}) > 0
 
 
 def get_config() -> dict:
-    rows = get_db().execute("SELECT key, value FROM config").fetchall()
+    rows = db.fetchall("SELECT key, value FROM config")
     out: dict = {}
     for r in rows:
         out[r["key"]] = r["value"]
@@ -106,10 +100,8 @@ def get_config() -> dict:
 
 
 def set_config(key: str, value: str) -> None:
-    db = get_db()
     db.execute(
-        "INSERT INTO config(key, value) VALUES (?, ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (key, str(value)),
+        "INSERT INTO config(key, value) VALUES (:key, :value) "
+        "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        {"key": key, "value": str(value)},
     )
-    db.commit()

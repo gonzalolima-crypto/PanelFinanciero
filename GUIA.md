@@ -225,101 +225,141 @@ Cerrá la ventana negra y volvé a abrir `iniciar.bat`.
 
 ---
 
-## 4. Cómo publicarla en internet (Fly.io)
+## 4. Cómo publicarla en internet (Render + Neon, gratis)
 
-> Hacé esto **solo cuando me confirmes que probaste todo en local y está OK**.
-> Ya dejé configurados el `Dockerfile` y el `fly.toml`. Vos corrés unos pocos
-> comandos; yo te acompaño.
+Todo por la web, sin instalar nada. Son dos servicios, ambos con plan gratuito
+y **sin tarjeta de crédito**:
 
-### 4.1 Crear las cuentas
+| Servicio | Para qué | Por qué |
+|---|---|---|
+| **Neon** | Guardar los datos (base Postgres) | El disco de Render se borra en cada reinicio; en Neon los datos quedan. |
+| **Render** | Correr la app | Te da la dirección web pública. |
 
-1. **GitHub**: cuenta gratis en https://github.com/signup (si no tenés).
-2. **Fly.io**: cuenta gratis en https://fly.io/app/sign-up
-   (pide una tarjeta para validar identidad; el tamaño que vamos a usar no
-   tiene costo, pero la tarjeta es obligatoria en el alta).
+El código ya está preparado: en tu computadora sigue usando el archivo local
+`data/panel.db`, y en Render usa Neon automáticamente (por la variable
+`DATABASE_URL`).
 
-### 4.2 Subir el código a GitHub
+---
 
-El proyecto ya viene con `git` inicializado. Para subirlo:
+### 4.1 Crear la base de datos en Neon (5 min)
 
-```bash
-git remote add origin https://github.com/TU-USUARIO/panel-financiero.git
-git branch -M main
-git push -u origin main
-```
+1. Entrá a **https://neon.tech** y hacé clic en **"Sign up"**.
+2. Registrate con **GitHub** o **Google** (no pide tarjeta).
+3. Te crea un proyecto solo. Si te pregunta:
+   - **Project name**: `panel-financiero`
+   - **Postgres version**: la que venga por defecto
+   - **Region**: elegí una de **US East** (es la más cercana a Render)
+4. Al terminar te muestra un recuadro **"Connection string"** con un texto largo
+   que empieza con `postgresql://`. Hacé clic en **Copy**.
+   - Si no lo ves: menú izquierdo → **Dashboard** → botón **Connect**.
+5. **Guardalo** en una nota: lo vas a pegar en el paso 4.3.
 
-(O creá el repo desde la web de GitHub — **privado** — y te muestra estos mismos comandos.)
+> Ese texto es la llave de tu base de datos. No lo compartas.
 
-### 4.3 Instalar la herramienta de Fly
+---
 
-En PowerShell:
+### 4.2 Crear la cuenta de Render (2 min)
 
-```powershell
-pwsh -Command "iwr https://fly.io/install.ps1 -useb | iex"
-```
+1. Entrá a **https://render.com** → **"Get Started"**.
+2. Registrate **con GitHub** (así Render puede leer tu repositorio).
+3. Cuando te pida permisos sobre GitHub, autorizá el repositorio
+   **`PanelFinanciero`** (o "All repositories", como prefieras).
 
-Cerrá y volvé a abrir PowerShell. Probá: `fly version`.
+---
 
-### 4.4 Iniciar sesión y crear la app
+### 4.3 Crear el servicio (5 min)
 
-```bash
-fly auth login
-```
+1. En el panel de Render, arriba a la derecha: **New +** → **Blueprint**.
+2. En la lista de repositorios, elegí **`gonzalolima-crypto/PanelFinanciero`**
+   → **Connect**.
+3. Render lee solo el archivo `render.yaml` del proyecto y te muestra el servicio
+   **panel-financiero**. Te va a pedir completar **3 valores**:
 
-Después, **parado en la carpeta del proyecto**:
+   | Campo | Qué poner |
+   |---|---|
+   | `DATABASE_URL` | El texto largo que copiaste de Neon (paso 4.1) |
+   | `GROQ_API_KEY` | Tu clave de Groq (la que empieza con `gsk_`) |
+   | `APP_PASSWORD` | La contraseña que vas a usar para entrar al panel |
 
-```bash
-fly launch --no-deploy
-```
+   (`SECRET_KEY` la genera Render sola, no la toques.)
+4. Ponele un nombre al Blueprint (por ejemplo `panel-financiero`) y hacé clic en
+   **Apply** / **Create**.
 
-- ¿Copiar la configuración existente (`fly.toml`)? → **Yes**.
-- Nombre de la app (ej: `panel-financiero-gonza`) → define la dirección
-  `https://panel-financiero-gonza.fly.dev`.
-- Región: `eze` (Buenos Aires), ya viene puesta.
-- ¿Base de datos / Redis? → **No**.
+---
 
-### 4.5 Cargar los secretos (claves)
+### 4.4 Esperar y entrar
 
-```bash
-fly secrets set APP_PASSWORD="tu-contraseña-fuerte"
-fly secrets set SECRET_KEY="pega-acá-40-caracteres-al-azar"
-fly secrets set GROQ_API_KEY="tu-clave-gsk_..."
-```
+- El primer deploy tarda **5 a 10 minutos** (instala Python y las librerías).
+  Vas viendo el progreso en la pestaña **Logs**.
+- Cuando termine, arriba te muestra la dirección:
+  **`https://panel-financiero-XXXX.onrender.com`**
+- Abrila. Te pide la contraseña (`APP_PASSWORD`) y ya estás adentro.
+- Esa dirección la podés abrir **desde el celular o desde cualquier lado**.
 
-### 4.6 Crear el disco donde viven los datos
+---
 
-```bash
-fly volumes create panel_data --region eze --size 1
-```
+### 4.5 Algo importante del plan gratuito
 
-### 4.7 Publicar
+La app **se "duerme" después de 15 minutos sin usarla**. La primera vez que
+entrás después de un rato tarda **entre 30 y 60 segundos** en despertar (parece
+colgada, pero está arrancando). Después anda normal.
 
-```bash
-fly deploy
-fly open
-```
+Si eso te molesta, el plan pago de Render (US$7/mes) la mantiene siempre
+despierta. No hace falta cambiar nada del código.
 
-Se abre `https://TU-APP.fly.dev` — esa dirección la abrís desde el celular o
-desde cualquier lado. Te pide la contraseña (`APP_PASSWORD`).
+---
 
-### 4.8 Actualizar la app más adelante
+### 4.6 Llevar los datos que tengas en tu computadora (opcional)
+
+Si ya cargaste movimientos en local y los querés en la app publicada:
+
+1. Abrí el archivo `.env` con el Bloc de notas y pegá la cadena de Neon en la
+   línea `DATABASE_URL=` (la misma del paso 4.1). Guardá.
+2. En PowerShell, parado en la carpeta del proyecto:
+
+   ```powershell
+   .venv\Scripts\python.exe migrar_a_postgres.py
+   ```
+
+3. **Volvé a dejar `DATABASE_URL=` vacía** en el `.env` para que en tu compu se
+   siga usando la base local.
+
+---
+
+### 4.7 Actualizar la app más adelante
+
+Cada vez que se cambie algo del código:
 
 ```bash
 git add -A
 git commit -m "descripción del cambio"
 git push
-fly deploy
 ```
+
+Render detecta el push y **redespliega solo**. No hay que hacer nada más.
+
+---
 
 ### Problemas frecuentes
 
 | Síntoma | Solución |
 |---|---|
-| `fly deploy` falla al construir | `fly deploy --verbose` y pasame el error. |
-| La voz / comprobantes dan error | Faltó `fly secrets set GROQ_API_KEY=...`. Verificá con `fly secrets list`. |
-| Los datos se borraron tras un deploy | El volumen no quedó montado. Verificá `fly volumes list` y la sección `[mounts]` del `fly.toml`. |
+| Tarda 40 seg en abrir la primera vez | Normal: el plan gratuito duerme la app (ver 4.5). |
+| "Application failed to respond" | Todavía está arrancando. Esperá 1 minuto y recargá. Si sigue, mirá **Logs** en Render y pasame el error. |
+| El deploy falla en el build | Pestaña **Logs** → copiá el error y pasámelo. |
+| Entra pero se pierden los movimientos | `DATABASE_URL` quedó vacía o mal. En Render: **Environment** → verificá que esté la cadena de Neon completa. |
+| Error de conexión a la base | Si la cadena de Neon termina en `&channel_binding=require`, probá borrando esa parte. |
+| La voz / comprobantes dan error | Falta o está mal `GROQ_API_KEY` en **Environment**. |
 | "Groq está limitando las consultas" | Es el tope gratuito por minuto. Esperá un minuto y reintentá. |
-| "El modelo configurado no está disponible" | El nombre en `GROQ_TEXT_MODEL` no existe para tu cuenta. Revisá los modelos disponibles en console.groq.com. |
+| Olvidaste la contraseña del panel | Render → **Environment** → cambiá `APP_PASSWORD` → **Save** (redespliega solo). |
+
+---
+
+### Alternativa: Fly.io
+
+El proyecto también trae `Dockerfile` y `fly.toml` listos para
+[Fly.io](https://fly.io) (~US$2/mes, con disco propio y sin dormirse, usando
+SQLite). Si algún día querés migrar, pedímelo y te paso los pasos.
 
 ---
 

@@ -1,0 +1,48 @@
+# Configuración de despliegue en Render (https://render.com)
+#
+# Render lee este archivo al crear un "Blueprint" desde el repositorio de GitHub
+# y arma el servicio solo. Las claves marcadas con `sync: false` te las pide a
+# vos en pantalla al momento de crear el servicio (no se guardan en el repo).
+#
+# La base de datos NO es SQLite en producción: el disco del plan gratuito de
+# Render se borra en cada reinicio. Se usa un Postgres externo gratuito (Neon)
+# a través de la variable DATABASE_URL. Ver GUIA.md sección 4.
+
+services:
+  - type: web
+    name: panel-financiero
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # 1 proceso + 4 hilos: liviano en memoria (el plan gratuito da 512 MB) y
+    # permite atender otra cosa mientras una consulta a Groq está en curso.
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120 wsgi:app
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+
+      # --- Claves (Render te las pide al crear el servicio) ---
+      # Cadena de conexión de Neon: postgresql://usuario:clave@host/basedatos?sslmode=require
+      - key: DATABASE_URL
+        sync: false
+      # Tu clave de Groq (https://console.groq.com/keys)
+      - key: GROQ_API_KEY
+        sync: false
+      # La contraseña para entrar al panel
+      - key: APP_PASSWORD
+        sync: false
+
+      # Clave para firmar las cookies de sesión: la genera Render sola
+      - key: SECRET_KEY
+        generateValue: true
+
+      # --- Ajustes (podés dejarlos como están) ---
+      - key: GROQ_TEXT_MODEL
+        value: openai/gpt-oss-120b
+      - key: GROQ_TRANSCRIBE_MODEL
+        value: whisper-large-v3-turbo
+      - key: MAX_CONTENT_MB
+        value: "25"
+      - key: PDF_MAX_PAGES
+        value: "8"
