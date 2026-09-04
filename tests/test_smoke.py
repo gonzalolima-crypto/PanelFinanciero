@@ -141,6 +141,45 @@ def test_parser_consumos_bbva():
     assert llm._extract_due_date("VENCIMIENTO ANTERIOR\n06-Jul-26\nsin actual") == ""
 
 
+def test_cambiar_password_cierra_las_sesiones(monkeypatch, tmp_path):
+    """Al cambiar APP_PASSWORD, quien ya estaba logueado tiene que volver a entrar."""
+    import importlib
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "t.db"))
+    monkeypatch.setenv("APP_PASSWORD", "vieja")
+
+    from app import config as cfg
+    importlib.reload(cfg)
+    from app import db as dbmod
+    importlib.reload(dbmod)
+    from app import models, auth, routes
+    for m in (models, auth, routes):
+        importlib.reload(m)
+    import app as pkg
+    importlib.reload(pkg)
+
+    application = pkg.create_app()
+    application.config.update(TESTING=True)
+    client = application.test_client()
+
+    # entra con la contraseña vieja
+    assert client.post("/login", data={"password": "vieja"}).status_code == 302
+    assert client.get("/").status_code == 200
+
+    # el admin cambia la contraseña (equivale a editarla en Render)
+    monkeypatch.setenv("APP_PASSWORD", "nueva")
+    importlib.reload(cfg)
+    importlib.reload(auth)
+
+    # la sesión que tenía abierta ya no vale
+    assert client.get("/").status_code == 302
+    assert client.get("/api/movements").status_code == 401
+    # la contraseña vieja ya no entra, la nueva sí
+    assert "incorrecta" in client.post("/login", data={"password": "vieja"}).get_data(as_text=True)
+    assert client.post("/login", data={"password": "nueva"}).status_code == 302
+    assert client.get("/").status_code == 200
+
+
 def test_traduccion_sql_postgres(monkeypatch):
     """Con DATABASE_URL de Postgres, las consultas :nombre se traducen a %(nombre)s."""
     import importlib
