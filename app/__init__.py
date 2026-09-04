@@ -1,11 +1,27 @@
 """Fábrica de la aplicación Flask."""
 from datetime import timedelta
 import logging
+import mimetypes
 
 from flask import Flask, jsonify
 
 from . import config as app_config
 from . import auth, db, routes
+
+# Los tipos de archivo se registran ACÁ, al importar el módulo (un solo hilo).
+# El módulo `mimetypes` de Python se inicializa solo la primera vez que se lo
+# usa, y esa inicialización no es segura con varios hilos: si dos pedidos de
+# archivos estáticos entran a la vez recién arrancado el servidor, uno puede
+# recibir "text/plain" y el navegador rechaza el CSS (y lo cachea mal).
+mimetypes.init()
+mimetypes.add_type("text/css", ".css")
+mimetypes.add_type("text/javascript", ".js")
+mimetypes.add_type("image/svg+xml", ".svg")
+mimetypes.add_type("font/woff2", ".woff2")
+
+# Se agrega como ?v=... a las URLs de los estáticos. Subir este número obliga a
+# los navegadores a volver a bajar CSS/JS aunque los tengan cacheados.
+STATIC_VERSION = "2"
 
 
 def create_app() -> Flask:
@@ -16,8 +32,13 @@ def create_app() -> Flask:
         PERMANENT_SESSION_LIFETIME=timedelta(days=30),
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
+        # 1 hora: si alguna vez se cachea algo mal, se corrige solo enseguida.
+        SEND_FILE_MAX_AGE_DEFAULT=timedelta(hours=1),
     )
     app.json.ensure_ascii = False
+
+    # Disponible en las plantillas como {{ v }} para el ?v= de los estáticos.
+    app.jinja_env.globals["v"] = STATIC_VERSION
 
     logging.basicConfig(level=logging.INFO)
 
